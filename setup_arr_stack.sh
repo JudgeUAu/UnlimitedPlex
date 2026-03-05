@@ -354,7 +354,7 @@ services:
     volumes:
       - /opt/prowlarr:/config
       - /opt/prowlarr/Definitions/Custom:/Custom
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
 
   # ── Radarr (Movies) ────────────────────────────────────────────────────
   radarr:
@@ -369,7 +369,7 @@ services:
       - "7878:7878"
     volumes:
       - /opt/radarr:/config
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
     depends_on:
       - prowlarr
 
@@ -386,7 +386,7 @@ services:
       - "7879:7878"
     volumes:
       - /opt/radarr4k:/config
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
     depends_on:
       - prowlarr
 
@@ -403,7 +403,7 @@ services:
       - "8989:8989"
     volumes:
       - /opt/sonarr:/config
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
     depends_on:
       - prowlarr
 
@@ -420,7 +420,7 @@ services:
       - "8990:8989"
     volumes:
       - /opt/sonarr4k:/config
-      - /mnt:/mnt
+      - /mnt:/mnt:rshared
     depends_on:
       - prowlarr
 
