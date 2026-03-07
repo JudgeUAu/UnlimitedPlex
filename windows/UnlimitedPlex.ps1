@@ -11,6 +11,23 @@ if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
     exit
 }
 
+# Global error log - always write errors here so silent crashes are visible
+$Script:ErrorLogPath = Join-Path $env:TEMP "UnlimitedPlex_error.log"
+"[$(Get-Date)] Script started" | Out-File $Script:ErrorLogPath -Append
+
+trap {
+    $errMsg = "[$(Get-Date)] FATAL ERROR: $_`n$($_.ScriptStackTrace)"
+    $errMsg | Out-File $Script:ErrorLogPath -Append
+    try {
+        [System.Windows.MessageBox]::Show(
+            "A fatal error occurred:`n`n$_`n`nFull error log saved to:`n$Script:ErrorLogPath",
+            "UnlimitedPlex Error", "OK", "Error")
+    } catch {
+        $errMsg | Out-File "$env:TEMP\UnlimitedPlex_fatal.log" -Append
+    }
+    continue
+}
+
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
@@ -557,8 +574,19 @@ function Set-Status {
 
 function Test-DockerRunning {
     try {
-        & docker info 2>&1 | Out-Null
-        return ($LASTEXITCODE -eq 0)
+        # Try docker directly first
+        $dockerPath = Get-Command docker -ErrorAction SilentlyContinue
+        if ($dockerPath) {
+            & docker info 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { return $true }
+        }
+        # Fallback: check via WSL
+        $distro = $WSLDistroBox.Text.Trim()
+        if ($distro) {
+            $result = & wsl -d $distro -e bash -c "docker info 2>/dev/null && echo ok" 2>&1
+            if ("$result" -match "ok") { return $true }
+        }
+        return $false
     } catch {
         return $false
     }
@@ -1039,9 +1067,18 @@ $OpenServicesBtn.Add_Click({
 # =============================================================================
 Write-Log "UnlimitedPlex Installer started." "INFO"
 Write-Log "Click 'Check Prerequisites' to begin." "INFO"
+Write-Log "Error log: $Script:ErrorLogPath" "INFO"
 
-$Window.Add_Loaded({
-    $CheckPrereqsBtn.RaiseEvent([System.Windows.RoutedEventArgs]::new([System.Windows.Controls.Button]::ClickEvent))
-})
+"[$(Get-Date)] Window about to show" | Out-File $Script:ErrorLogPath -Append
 
-$Window.ShowDialog() | Out-Null
+try {
+    $Window.ShowDialog() | Out-Null
+} catch {
+    $errMsg = "[$(Get-Date)] ShowDialog error: $_"
+    $errMsg | Out-File $Script:ErrorLogPath -Append
+    [System.Windows.MessageBox]::Show(
+        "Failed to show window:`n$_`n`nError log: $Script:ErrorLogPath",
+        "UnlimitedPlex Error", "OK", "Error")
+}
+
+"[$(Get-Date)] Script ended normally" | Out-File $Script:ErrorLogPath -Append

@@ -43,12 +43,20 @@ if %errorLevel% neq 0 (
     echo  [ERROR] The installer encountered an error.
     echo  Error code: %errorLevel%
     echo.
+    echo  --- Check error log ---
+    echo  %TEMP%\UnlimitedPlex_error.log
+    echo.
     echo  --- Troubleshooting ---
     echo  1. Make sure you right-clicked and chose "Run as Administrator"
     echo  2. Try right-clicking UnlimitedPlex.ps1 ^> Properties ^> Unblock
     echo  3. Try running manually in PowerShell (Admin):
     echo     powershell -ExecutionPolicy Bypass -STA -File "%~dp0UnlimitedPlex.ps1"
     echo  4. Check Windows Defender / Antivirus is not blocking the script
+    echo.
+    echo  --- Opening error log ---
+    if exist "%TEMP%\UnlimitedPlex_error.log" (
+        type "%TEMP%\UnlimitedPlex_error.log"
+    )
     echo.
     pause
 )
