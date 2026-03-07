@@ -1,69 +1,71 @@
 #!/bin/bash
 # =============================================================================
 #  UnlimitedPlex Beta - Modular Setup Script
-#  Installs only the services you select, with multiple instance support
+#  Same structure as original scripts but with selectable instances
 # =============================================================================
 #
-#  USAGE (called by TUI or Windows GUI - do not run directly):
-#    sudo bash setup_beta.sh --config /tmp/unlimitedplex_config.json
+#  DIRECTORY STRUCTURE (same as original):
+#    /opt/zurg-testing/          - Zurg + Rclone (global, single instance)
+#    /opt/arr-stack/             - All Radarr/Sonarr/Prowlarr instances in one compose
+#    /opt/decypharr/             - Decypharr (global, knows all arr instances)
+#    /opt/tautulli/              - Tautulli (global, optional)
+#    /opt/nzbdav/                - NZBDav + Rclone sidecar (global, optional)
+#    /opt/pulsarr/               - Pulsarr (global, optional)
+#
+#  MOUNT STRUCTURE (same as original):
+#    /mnt/remote/realdebrid/     - Zurg rclone mount
+#    /mnt/remote/nzbdav/         - NZBDav rclone mount (if enabled)
+#    /mnt/symlinks/<inst>_radarr/ - Decypharr symlinks per radarr instance
+#    /mnt/symlinks/<inst>_sonarr/ - Decypharr symlinks per sonarr instance
+#    /mnt/plex/<InstLabel>/Movies/ - Plex library dirs per instance
+#    /mnt/plex/<InstLabel>/TV/     - Plex library dirs per instance
 #
 #  CONFIG JSON FORMAT:
 #  {
-#    "rd_token": "YOUR_RD_TOKEN",
-#    "plex_token": "YOUR_PLEX_TOKEN",
+#    "rd_token": "...",
+#    "plex_token": "...",
 #    "timezone": "America/New_York",
 #    "zurg_version": "v0.9.3-final",
 #    "instances": [
-#      {
-#        "name": "main",
-#        "label": "Main",
-#        "services": ["zurg","radarr","sonarr","prowlarr","decypharr","pulsarr"]
-#      },
-#      {
-#        "name": "4k",
-#        "label": "4K",
-#        "services": ["zurg","radarr","sonarr","decypharr"]
-#      },
-#      {
-#        "name": "kids",
-#        "label": "Kids",
-#        "services": ["radarr","sonarr"]
-#      }
+#      { "name": "main",  "label": "Main",  "services": ["radarr","sonarr","prowlarr"] },
+#      { "name": "4k",    "label": "4K",    "services": ["radarr","sonarr"] },
+#      { "name": "kids",  "label": "Kids",  "services": ["radarr","sonarr"] }
 #    ],
-#    "global_services": ["tautulli","nzbdav"],
+#    "global_services": ["tautulli","nzbdav","pulsarr"],
 #    "nzbdav_password": "changeme"
 #  }
+#
+#  USAGE:
+#    sudo bash setup_beta.sh --config /tmp/unlimitedplex_config.json
 #
 # =============================================================================
 
 set -euo pipefail
 
-# ── Colours ──────────────────────────────────────────────────────────────────
+# ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
-BLUE='\033[0;34m'
 BOLD='\033[1m'
-DIM='\033[2m'
 NC='\033[0m'
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE="/var/log/unlimitedplex_beta.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-log()     { echo -e "${GREEN}[OK]${NC}    $*" | tee -a "$LOG_FILE"; }
 info()    { echo -e "${CYAN}[INFO]${NC}  $*" | tee -a "$LOG_FILE"; }
+success() { echo -e "${GREEN}[OK]${NC}    $*" | tee -a "$LOG_FILE"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*" | tee -a "$LOG_FILE"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" | tee -a "$LOG_FILE"; }
-step()    { echo -e "\n${BOLD}${MAGENTA}━━━ $* ━━━${NC}\n" | tee -a "$LOG_FILE"; }
-progress(){ echo -e "${BLUE}[STEP]${NC}  $*" | tee -a "$LOG_FILE"; }
+error()   { echo -e "${RED}[ERROR]${NC} $*" | tee -a "$LOG_FILE"; exit 1; }
+section() { echo -e "\n${BOLD}${CYAN}══════════════════════════════════════════${NC}" | tee -a "$LOG_FILE"
+            echo -e "${BOLD}${CYAN}  $*${NC}" | tee -a "$LOG_FILE"
+            echo -e "${BOLD}${CYAN}══════════════════════════════════════════${NC}\n" | tee -a "$LOG_FILE"; }
 
 # ── Root check ────────────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
   error "Please run as root: sudo bash setup_beta.sh --config /path/to/config.json"
-  exit 1
 fi
 
 # ── Parse args ────────────────────────────────────────────────────────────────
@@ -71,186 +73,613 @@ CONFIG_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) CONFIG_FILE="$2"; shift 2 ;;
-    *) error "Unknown argument: $1"; exit 1 ;;
+    *) error "Unknown argument: $1" ;;
   esac
 done
 
-if [[ -z "$CONFIG_FILE" || ! -f "$CONFIG_FILE" ]]; then
-  error "Config file not found: $CONFIG_FILE"
-  exit 1
-fi
+[[ -z "$CONFIG_FILE" || ! -f "$CONFIG_FILE" ]] && error "Config file not found: $CONFIG_FILE"
 
-# ── Parse JSON config (using python3 for reliability) ─────────────────────────
-parse_json() {
-  python3 -c "
-import json, sys
-data = json.load(open('$CONFIG_FILE'))
-print(data.get('$1', ''))
-"
-}
+# ── Parse JSON config ─────────────────────────────────────────────────────────
+py3() { python3 -c "$@"; }
 
-parse_json_list() {
-  python3 -c "
-import json, sys
-data = json.load(open('$CONFIG_FILE'))
-val = data.get('$1', [])
-print('\n'.join(val) if isinstance(val, list) else val)
-"
-}
+RD_TOKEN=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('rd_token',''))")
+PLEX_TOKEN=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('plex_token',''))")
+TZ=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('timezone','America/New_York'))")
+ZURG_VERSION=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('zurg_version','v0.9.3-final'))")
+NZBDAV_PASSWORD=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('nzbdav_password','changeme'))")
 
-parse_instances() {
-  python3 -c "
-import json
-data = json.load(open('$CONFIG_FILE'))
-for inst in data.get('instances', []):
-    svcs = ','.join(inst.get('services', []))
-    print(f&quot;{inst['name']}|{inst['label']}|{svcs}&quot;)
-"
-}
-
-RD_TOKEN=$(parse_json "rd_token")
-PLEX_TOKEN=$(parse_json "plex_token")
-TZ=$(parse_json "timezone")
-ZURG_VERSION=$(parse_json "zurg_version")
-NZBDAV_PASSWORD=$(parse_json "nzbdav_password")
-
-if [[ -z "$RD_TOKEN" ]]; then
-  error "rd_token is required in config"
-  exit 1
-fi
-if [[ -z "$PLEX_TOKEN" ]]; then
-  error "plex_token is required in config"
-  exit 1
-fi
-[[ -z "$TZ" ]]           && TZ="America/New_York"
+[[ -z "$RD_TOKEN" ]]   && error "rd_token is required in config"
+[[ -z "$PLEX_TOKEN" ]] && error "plex_token is required in config"
+[[ -z "$TZ" ]]         && TZ="America/New_York"
 [[ -z "$ZURG_VERSION" ]] && ZURG_VERSION="v0.9.3-final"
-[[ -z "$NZBDAV_PASSWORD" ]] && NZBDAV_PASSWORD="changeme"
 
-export RD_TOKEN PLEX_TOKEN TZ ZURG_VERSION NZBDAV_PASSWORD
 export DEBIAN_FRONTEND=noninteractive
+PUID=0
+PGID=0
+DOCKER_NETWORK="arr-stack_arr-network"
+ZURG_DIR="/opt/zurg-testing"
+ARR_DIR="/opt/arr-stack"
+DECYPHARR_DIR="/opt/decypharr"
+
+# ── Read instances from JSON ──────────────────────────────────────────────────
+# Returns: name|label|service1,service2,...
+get_instances() {
+  py3 "
+import json
+d = json.load(open('$CONFIG_FILE'))
+for i in d.get('instances', []):
+    svcs = ','.join(i.get('services', []))
+    print(f&quot;{i['name']}|{i['label']}|{svcs}&quot;)
+"
+}
+
+# Returns global services one per line
+get_global_services() {
+  py3 "
+import json
+d = json.load(open('$CONFIG_FILE'))
+for s in d.get('global_services', []):
+    print(s)
+"
+}
+
+has_global_service() {
+  get_global_services | grep -q "^$1$"
+}
+
+instance_has_service() {
+  local INST_SVCS="$1"
+  local SVC="$2"
+  echo "$INST_SVCS" | tr ',' '\n' | grep -q "^${SVC}$"
+}
 
 # ── Port allocation ───────────────────────────────────────────────────────────
-# Base ports - each instance offsets by instance_index * 100
-# Instance 0 (main): base ports
-# Instance 1 (4k):   base + 100
-# Instance 2 (kids): base + 200
-# etc.
-PORT_ZURG=9999
+# Base ports - each instance offsets by index * 100
 PORT_RADARR=7878
 PORT_SONARR=8989
 PORT_PROWLARR=9696
-PORT_DECYPHARR=8282
-PORT_PULSARR=3003
-PORT_TAUTULLI=8181
-PORT_NZBDAV=3000
-PORT_PLEX=32400   # Plex is always single instance
 
-get_port() {
-  local base_port=$1
-  local instance_idx=$2
-  echo $((base_port + instance_idx * 100))
-}
-
-# ── Directory helpers ─────────────────────────────────────────────────────────
-BASE_DIR="/opt/unlimitedplex"
-mkdir -p "$BASE_DIR"
+get_port() { echo $(( $1 + $2 * 100 )); }
 
 # =============================================================================
 # STEP 0 - SYSTEM UPDATE & DEPENDENCIES
 # =============================================================================
-step "Step 0 - System Update & Dependencies"
+section "Step 0 - System Update & Dependencies"
 
-progress "Updating package lists..."
-apt-get update -qq 2>&1 | tail -5
-progress "Installing dependencies..."
-apt-get install -y -qq \
-  curl wget git unzip jq python3 python3-pip \
-  ca-certificates gnupg lsb-release \
-  fuse3 nfs-common \
-  2>&1 | tail -5
-log "Dependencies installed"
+info "Updating package lists..."
+apt-get update -y 2>&1 | tail -3
+info "Installing essential tools..."
+apt-get install -y git curl wget screen inotify-tools libxml2-utils fuse3 python3 python3-pip 2>&1 | tail -5
+success "Dependencies installed."
 
 # =============================================================================
-# STEP 1 - INSTALL DOCKER
+# STEP 1 - INSTALL DOCKER (same logic as original)
 # =============================================================================
-step "Step 1 - Install Docker"
+section "Step 1 - Install Docker"
 
-if command -v docker &>/dev/null; then
-  log "Docker already installed: $(docker --version)"
+if snap list docker &>/dev/null 2>&1; then
+  warn "Snap Docker detected - removing and reinstalling via apt..."
+  snap remove docker
+  rm -f /usr/local/bin/docker 2>/dev/null || true
+fi
+
+if command -v docker &>/dev/null && ! snap list docker &>/dev/null 2>&1; then
+  success "Docker already installed: $(docker --version)"
 else
-  progress "Installing Docker..."
-  curl -fsSL https://get.docker.com | bash 2>&1 | tail -10
-  systemctl enable docker
-  systemctl start docker
-  log "Docker installed: $(docker --version)"
+  info "Installing Docker via official script..."
+  apt-get remove -y docker docker-engine docker.io 2>/dev/null || true
+  apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+    | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  apt-get update -y
+  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  success "Docker installed: $(docker --version)"
 fi
 
-# Ensure docker compose plugin works
-if ! docker compose version &>/dev/null; then
-  progress "Installing docker-compose-plugin..."
-  apt-get install -y -qq docker-compose-plugin 2>&1 | tail -3
+# Start Docker
+if systemctl list-units --type=service 2>/dev/null | grep -q "docker.service"; then
+  systemctl start docker  || true
+  systemctl enable docker || true
 fi
-log "Docker Compose: $(docker compose version)"
+
+if ! docker info &>/dev/null 2>&1; then
+  error "Cannot connect to Docker daemon. Please ensure Docker is running."
+fi
+success "Docker is running."
 
 # =============================================================================
 # STEP 2 - SHARED MOUNT SETUP
 # =============================================================================
-step "Step 2 - Shared Mount Setup"
+section "Step 2 - Shared Mount Setup"
 
-progress "Setting up /mnt as shared mount point..."
-mount --bind /mnt /mnt 2>/dev/null || true
+info "Setting /mnt as shared mount..."
+if ! mountpoint -q /mnt 2>/dev/null; then
+  mount --bind /mnt /mnt 2>/dev/null || true
+fi
 mount --make-shared /mnt 2>/dev/null || true
-
-# Ensure fuse is available
 modprobe fuse 2>/dev/null || true
-echo "user_allow_other" >> /etc/fuse.conf 2>/dev/null || true
-
-log "Shared mount configured"
+grep -q "user_allow_other" /etc/fuse.conf 2>/dev/null || echo "user_allow_other" >> /etc/fuse.conf
+success "Shared mount configured."
 
 # =============================================================================
-# STEP 3 - INSTALL PLEX MEDIA SERVER (always required)
+# STEP 3 - DIRECTORY STRUCTURE (same as original)
 # =============================================================================
-step "Step 3 - Install Plex Media Server"
+section "Step 3 - Create Directory Structure"
 
-PLEX_DIR="$BASE_DIR/plex"
-mkdir -p "$PLEX_DIR/config" "$PLEX_DIR/transcode"
-mkdir -p /mnt/plex/movies /mnt/plex/tv /mnt/plex/movies4k /mnt/plex/tv4k /mnt/plex/kids/movies /mnt/plex/kids/tv
+info "Creating Plex library directories..."
+# Base Plex dirs
+mkdir -p /mnt/plex
 
-if docker ps -a --format '{{.Names}}' | grep -q '^plexmediaserver$'; then
-  log "Plex container already exists - skipping"
+# Create per-instance Plex dirs
+while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
+  [[ -z "$INST_NAME" ]] && continue
+  mkdir -p "/mnt/plex/${INST_LABEL}/Movies"
+  mkdir -p "/mnt/plex/${INST_LABEL}/TV"
+  info "  Created: /mnt/plex/${INST_LABEL}/{Movies,TV}"
+done < <(get_instances)
+success "Plex library directories created."
+
+info "Creating symlink directories..."
+# Create per-instance symlink dirs (for Decypharr)
+while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
+  [[ -z "$INST_NAME" ]] && continue
+  if instance_has_service "$INST_SVCS" "radarr"; then
+    mkdir -p "/mnt/symlinks/${INST_NAME}_radarr"
+    info "  Created: /mnt/symlinks/${INST_NAME}_radarr"
+  fi
+  if instance_has_service "$INST_SVCS" "sonarr"; then
+    mkdir -p "/mnt/symlinks/${INST_NAME}_sonarr"
+    info "  Created: /mnt/symlinks/${INST_NAME}_sonarr"
+  fi
+done < <(get_instances)
+success "Symlink directories created."
+
+info "Creating mount directories..."
+mkdir -p /mnt/remote/realdebrid
+has_global_service "nzbdav" && mkdir -p /mnt/remote/nzbdav || true
+success "Mount directories created."
+
+chown -R "${PUID}:${PGID}" /mnt/plex /mnt/symlinks /opt/decypharr 2>/dev/null || true
+
+# =============================================================================
+# STEP 4 - INSTALL PLEX MEDIA SERVER (native, same as original)
+# =============================================================================
+section "Step 4 - Install Plex Media Server"
+
+if systemctl is-active --quiet plexmediaserver 2>/dev/null; then
+  success "Plex Media Server already running."
 else
-  progress "Deploying Plex Media Server..."
-  cat > "$PLEX_DIR/docker-compose.yml" << EOF
-services:
-  plex:
-    image: plexinc/pms-docker:latest
-    container_name: plexmediaserver
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      - PLEX_CLAIM=${PLEX_TOKEN}
-      - TZ=${TZ}
-      - PLEX_UID=0
-      - PLEX_GID=0
-    volumes:
-      - ${PLEX_DIR}/config:/config
-      - ${PLEX_DIR}/transcode:/transcode
-      - /mnt/plex:/mnt/plex:rshared
-      - /mnt/remote:/mnt/remote:rshared
-EOF
-  cd "$PLEX_DIR" && docker compose up -d
-  log "Plex Media Server deployed on port $PORT_PLEX"
+  info "Adding Plex repository..."
+  curl https://downloads.plex.tv/plex-keys/PlexSign.key \
+    | gpg --dearmor \
+    | tee /usr/share/keyrings/plex-archive-keyring.gpg > /dev/null
+  echo "deb [signed-by=/usr/share/keyrings/plex-archive-keyring.gpg] \
+https://downloads.plex.tv/repo/deb public main" \
+    | tee /etc/apt/sources.list.d/plex.list
+  apt-get update -y
+  apt-get install -y libusb-dev || true
+  apt-get install -y plexmediaserver
+  systemctl enable plexmediaserver
+  systemctl start plexmediaserver
+  success "Plex Media Server installed and started."
+fi
+
+# Inject Plex token if provided
+PLEX_PREFS="/var/lib/plexmediaserver/Library/Application Support/Plex Media Server/Preferences.xml"
+if [[ -n "$PLEX_TOKEN" ]]; then
+  info "Plex token provided - will inject after Zurg setup."
 fi
 
 # =============================================================================
-# STEP 4 - INSTALL TAUTULLI (global service - single instance)
+# STEP 5 - ZURG & RCLONE (global, single instance - same as original)
 # =============================================================================
-install_tautulli() {
-  step "Installing Tautulli (Plex Analytics)"
-  local DIR="$BASE_DIR/tautulli"
-  mkdir -p "$DIR/config"
+section "Step 5 - Zurg & Rclone Setup"
 
-  cat > "$DIR/docker-compose.yml" << EOF
+docker pull "ghcr.io/debridmediamanager/zurg-testing:${ZURG_VERSION}" 2>&1 | tail -3
+
+if [[ -d "$ZURG_DIR" ]]; then
+  warn "$ZURG_DIR already exists - updating config only."
+else
+  info "Cloning Zurg repository..."
+  git clone https://github.com/debridmediamanager/zurg-testing.git "$ZURG_DIR"
+fi
+
+info "Writing Zurg config.yml..."
+cp "$ZURG_DIR/config.yml" "$ZURG_DIR/config.yml.backup.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+cat > "$ZURG_DIR/config.yml" << ZURG_CONFIG
+# Zurg configuration - UnlimitedPlex Beta
+zurg: v1
+token: ${RD_TOKEN}
+port: 9999
+api_rate_limit_per_minute: 60
+torrents_rate_limit_per_minute: 25
+concurrent_workers: 32
+check_for_changes_every_secs: 10
+ignore_renames: true
+retain_rd_torrent_name: true
+retain_folder_name_extension: true
+enable_repair: false
+auto_delete_rar_torrents: false
+get_torrents_count: 5000
+serve_from_rclone: true
+cache_network_test_results: true
+on_library_update: sh plex_update.sh "\$@"
+mount_path: /mnt/remote/realdebrid
+plex_server_url: http://localhost:32400
+plex_token: ${PLEX_TOKEN}
+
+directories:
+  shows:
+    group: media
+    group_order: 10
+    filters:
+      - has_episodes: true
+  movies:
+    group: media
+    group_order: 20
+    only_show_the_biggest_file: true
+    filters:
+      - regex: /.*/
+ZURG_CONFIG
+success "Zurg config.yml written."
+
+info "Writing Zurg docker-compose.yml..."
+cat > "$ZURG_DIR/docker-compose.yml" << COMPOSE_CONFIG
+services:
+  zurg:
+    image: ghcr.io/debridmediamanager/zurg-testing:${ZURG_VERSION}
+    container_name: zurg
+    restart: unless-stopped
+    healthcheck:
+      test: curl -f http://localhost:9999/dav/version.txt || exit 1
+      interval: 30s
+      timeout: 15s
+      retries: 20
+      start_period: 300s
+    ports:
+      - "9999:9999"
+    volumes:
+      - ${ZURG_DIR}/config.yml:/app/config.yml
+      - ${ZURG_DIR}/data:/app/data
+      - ${ZURG_DIR}/plex_update.sh:/app/plex_update.sh
+
+  rclone:
+    image: rclone/rclone:latest
+    container_name: rclone
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    volumes:
+      - ${ZURG_DIR}/rclone.conf:/config/rclone/rclone.conf
+      - /mnt/remote/realdebrid:/mnt/remote/realdebrid:shared
+    command: >
+      mount zurg: /mnt/remote/realdebrid
+      --allow-other
+      --allow-non-empty
+      --dir-cache-time 10s
+      --vfs-cache-mode full
+      --vfs-read-chunk-size 8M
+      --vfs-read-chunk-size-limit 2G
+      --buffer-size 32M
+      --log-level INFO
+    depends_on:
+      zurg:
+        condition: service_healthy
+COMPOSE_CONFIG
+success "Zurg docker-compose.yml written."
+
+info "Writing rclone.conf..."
+cat > "$ZURG_DIR/rclone.conf" << RCLONE_CONF
+[zurg]
+type = webdav
+url = http://zurg:9999/dav
+vendor = other
+pacer_min_sleep = 0
+RCLONE_CONF
+
+info "Writing plex_update.sh..."
+cat > "$ZURG_DIR/plex_update.sh" << 'PLEX_UPDATE'
+#!/bin/bash
+PLEX_HOST="localhost"
+PLEX_PORT="32400"
+PLEX_TOKEN="PLEX_TOKEN_PLACEHOLDER"
+MOUNT_POINT="/mnt/remote/realdebrid"
+for arg in "$@"; do
+    modified_arg="${MOUNT_POINT}/${arg}"
+    encoded_arg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${modified_arg}'))")
+    section_id=$(curl -s "http://${PLEX_HOST}:${PLEX_PORT}/library/sections?X-Plex-Token=${PLEX_TOKEN}" \
+        | xmllint --xpath "//Directory[Location/@path='${modified_arg}']/@key" - 2>/dev/null \
+        | sed 's/key="//;s/"//')
+    if [[ -n "$section_id" ]]; then
+        curl -s "http://${PLEX_HOST}:${PLEX_PORT}/library/sections/${section_id}/refresh?path=${encoded_arg}&X-Plex-Token=${PLEX_TOKEN}" > /dev/null
+    fi
+done
+PLEX_UPDATE
+chmod +x "$ZURG_DIR/plex_update.sh"
+
+# Inject Plex token into plex_update.sh
+if [[ -n "$PLEX_TOKEN" ]]; then
+  sed -i "s/PLEX_TOKEN_PLACEHOLDER/${PLEX_TOKEN}/" "$ZURG_DIR/plex_update.sh"
+  success "Plex token injected into plex_update.sh"
+fi
+
+# Clean up stale mounts and start
+docker stop rclone zurg 2>/dev/null || true
+docker rm   rclone zurg 2>/dev/null || true
+fusermount -uz /mnt/remote/realdebrid 2>/dev/null || true
+umount -l /mnt/remote/realdebrid 2>/dev/null || true
+mkdir -p /mnt/remote/realdebrid
+
+info "Starting Zurg & Rclone..."
+(cd "$ZURG_DIR" && docker compose up -d) 2>&1 | tail -5
+
+info "Waiting for Zurg to become healthy..."
+ZURG_WAIT=0
+while [[ $ZURG_WAIT -lt 600 ]]; do
+  HEALTH=$(docker inspect --format '{{.State.Health.Status}}' zurg 2>/dev/null || echo "unknown")
+  [[ "$HEALTH" == "healthy" ]] && { success "Zurg is healthy!"; break; }
+  [[ "$HEALTH" == "unhealthy" ]] && { warn "Zurg unhealthy - may still be indexing. Continuing..."; break; }
+  echo -ne "  Zurg: ${HEALTH} - waited ${ZURG_WAIT}s\r"
+  sleep 10; ZURG_WAIT=$((ZURG_WAIT + 10))
+done
+
+# =============================================================================
+# STEP 6 - DOCKER NETWORK
+# =============================================================================
+section "Step 6 - Docker Network"
+
+if ! docker network ls --format '{{.Name}}' | grep -q "^${DOCKER_NETWORK}$"; then
+  docker network create "$DOCKER_NETWORK" 2>/dev/null || true
+  success "Docker network created: $DOCKER_NETWORK"
+else
+  success "Docker network already exists: $DOCKER_NETWORK"
+fi
+
+# =============================================================================
+# STEP 7 - ARR STACK (all instances in one docker-compose)
+# =============================================================================
+section "Step 7 - Deploy Arr Stack"
+
+mkdir -p "$ARR_DIR"
+
+info "Building arr-stack docker-compose.yml with all instances..."
+cat > "$ARR_DIR/docker-compose.yml" << 'ARR_HEADER'
+# UnlimitedPlex Beta - Arr Stack
+# Auto-generated by setup_beta.sh - all instances in one compose file
+
+services:
+ARR_HEADER
+
+INST_IDX=0
+while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
+  [[ -z "$INST_NAME" ]] && continue
+
+  info "Adding instance to arr-stack: $INST_LABEL"
+
+  # RADARR
+  if instance_has_service "$INST_SVCS" "radarr"; then
+    RADARR_PORT=$(get_port $PORT_RADARR $INST_IDX)
+    mkdir -p "$ARR_DIR/radarr_${INST_NAME}/config"
+    cat >> "$ARR_DIR/docker-compose.yml" << EOF
+
+  radarr_${INST_NAME}:
+    image: ghcr.io/hotio/radarr:release
+    container_name: radarr_${INST_NAME}
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${ARR_DIR}/radarr_${INST_NAME}/config:/config
+      - /mnt:/mnt:rshared
+    ports:
+      - "${RADARR_PORT}:7878"
+    networks:
+      - arr-network
+EOF
+    info "  Radarr [${INST_LABEL}] -> port ${RADARR_PORT}"
+  fi
+
+  # SONARR
+  if instance_has_service "$INST_SVCS" "sonarr"; then
+    SONARR_PORT=$(get_port $PORT_SONARR $INST_IDX)
+    mkdir -p "$ARR_DIR/sonarr_${INST_NAME}/config"
+    cat >> "$ARR_DIR/docker-compose.yml" << EOF
+
+  sonarr_${INST_NAME}:
+    image: ghcr.io/hotio/sonarr:release
+    container_name: sonarr_${INST_NAME}
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${ARR_DIR}/sonarr_${INST_NAME}/config:/config
+      - /mnt:/mnt:rshared
+    ports:
+      - "${SONARR_PORT}:8989"
+    networks:
+      - arr-network
+EOF
+    info "  Sonarr [${INST_LABEL}] -> port ${SONARR_PORT}"
+  fi
+
+  # PROWLARR
+  if instance_has_service "$INST_SVCS" "prowlarr"; then
+    PROWLARR_PORT=$(get_port $PORT_PROWLARR $INST_IDX)
+    mkdir -p "$ARR_DIR/prowlarr_${INST_NAME}/config"
+    cat >> "$ARR_DIR/docker-compose.yml" << EOF
+
+  prowlarr_${INST_NAME}:
+    image: ghcr.io/hotio/prowlarr:release
+    container_name: prowlarr_${INST_NAME}
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${ARR_DIR}/prowlarr_${INST_NAME}/config:/config
+      - /mnt:/mnt:rshared
+    ports:
+      - "${PROWLARR_PORT}:9696"
+    networks:
+      - arr-network
+EOF
+    info "  Prowlarr [${INST_LABEL}] -> port ${PROWLARR_PORT}"
+  fi
+
+  INST_IDX=$((INST_IDX + 1))
+done < <(get_instances)
+
+# Append network section
+cat >> "$ARR_DIR/docker-compose.yml" << EOF
+
+networks:
+  arr-network:
+    name: ${DOCKER_NETWORK}
+    external: true
+EOF
+
+success "Arr-stack docker-compose.yml written."
+
+info "Starting arr-stack..."
+(cd "$ARR_DIR" && docker compose up -d) 2>&1 | tail -10
+success "Arr-stack deployed."
+
+# =============================================================================
+# STEP 8 - DECYPHARR (global, single instance, knows all arr instances)
+# =============================================================================
+section "Step 8 - Deploy Decypharr"
+
+mkdir -p "$DECYPHARR_DIR"
+
+info "Writing Decypharr docker-compose.yml..."
+cat > "$DECYPHARR_DIR/docker-compose.yml" << DECYPHARR_COMPOSE
+services:
+  decypharr:
+    image: cy01/blackhole:latest
+    container_name: decypharr
+    restart: unless-stopped
+    ports:
+      - "8282:8282"
+    volumes:
+      - /mnt:/mnt:rshared
+      - ${DECYPHARR_DIR}:/app
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - UMASK=002
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8282"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  default:
+    name: ${DOCKER_NETWORK}
+    external: true
+DECYPHARR_COMPOSE
+
+info "Building Decypharr config.json with all arr instances..."
+
+# Build arrs JSON array dynamically
+ARRS_JSON=""
+INST_IDX=0
+while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
+  [[ -z "$INST_NAME" ]] && continue
+
+  if instance_has_service "$INST_SVCS" "radarr"; then
+    [[ -n "$ARRS_JSON" ]] && ARRS_JSON="${ARRS_JSON},"
+    ARRS_JSON="${ARRS_JSON}
+    {
+      &quot;name&quot;: &quot;radarr_${INST_NAME}&quot;,
+      &quot;type&quot;: &quot;radarr&quot;,
+      &quot;host&quot;: &quot;http://radarr_${INST_NAME}:7878&quot;,
+      &quot;api_key&quot;: &quot;&quot;,
+      &quot;download_folder&quot;: &quot;/mnt/symlinks/${INST_NAME}_radarr&quot;
+    }"
+  fi
+
+  if instance_has_service "$INST_SVCS" "sonarr"; then
+    [[ -n "$ARRS_JSON" ]] && ARRS_JSON="${ARRS_JSON},"
+    ARRS_JSON="${ARRS_JSON}
+    {
+      &quot;name&quot;: &quot;sonarr_${INST_NAME}&quot;,
+      &quot;type&quot;: &quot;sonarr&quot;,
+      &quot;host&quot;: &quot;http://sonarr_${INST_NAME}:8989&quot;,
+      &quot;api_key&quot;: &quot;&quot;,
+      &quot;download_folder&quot;: &quot;/mnt/symlinks/${INST_NAME}_sonarr&quot;
+    }"
+  fi
+
+  INST_IDX=$((INST_IDX + 1))
+done < <(get_instances)
+
+cat > "$DECYPHARR_DIR/config.json" << DECYPHARR_CONFIG
+{
+  "port": "8282",
+  "download_folder": "/mnt/symlinks",
+  "log_level": "info",
+  "debrids": [
+    {
+      "name": "realdebrid",
+      "type": "realdebrid",
+      "api_key": "${RD_TOKEN}",
+      "mount_path": "/mnt/remote/realdebrid/__all__",
+      "download_uncached": false
+    }
+  ],
+  "arrs": [${ARRS_JSON}
+  ],
+  "qbittorrent": {
+    "port": "8282",
+    "download_folder": "/mnt/symlinks"
+  },
+  "rclone": {
+    "enabled": false
+  },
+  "repair": {
+    "enabled": true,
+    "interval": "6h"
+  }
+}
+DECYPHARR_CONFIG
+success "Decypharr config.json written."
+
+info "Starting Decypharr..."
+(cd "$DECYPHARR_DIR" && docker compose up -d) 2>&1 | tail -5
+sleep 5
+success "Decypharr deployed on port 8282."
+
+# =============================================================================
+# STEP 9 - TAUTULLI (global, optional)
+# =============================================================================
+if has_global_service "tautulli"; then
+  section "Step 9 - Deploy Tautulli"
+  TAUTULLI_DIR="/opt/tautulli"
+  mkdir -p "$TAUTULLI_DIR/config"
+
+  cat > "$TAUTULLI_DIR/docker-compose.yml" << TAUTULLI_COMPOSE
 services:
   tautulli:
     image: ghcr.io/tautulli/tautulli:latest
@@ -258,34 +687,68 @@ services:
     restart: unless-stopped
     environment:
       - TZ=${TZ}
-      - PUID=0
-      - PGID=0
+      - PUID=${PUID}
+      - PGID=${PGID}
     volumes:
-      - ${DIR}/config:/config
+      - ${TAUTULLI_DIR}/config:/config
     ports:
-      - "${PORT_TAUTULLI}:8181"
+      - "8181:8181"
     networks:
       - arr-network
 
 networks:
   arr-network:
+    name: ${DOCKER_NETWORK}
     external: true
-    name: arr-stack_arr-network
-EOF
-  cd "$DIR" && docker compose up -d
-  log "Tautulli deployed on port $PORT_TAUTULLI"
-}
+TAUTULLI_COMPOSE
+
+  (cd "$TAUTULLI_DIR" && docker compose up -d) 2>&1 | tail -3
+  success "Tautulli deployed on port 8181."
+fi
 
 # =============================================================================
-# STEP 5 - INSTALL NZBDAV (global service - single instance)
+# STEP 10 - PULSARR (global, optional)
 # =============================================================================
-install_nzbdav() {
-  step "Installing NZBDav (Usenet Streaming)"
-  local DIR="$BASE_DIR/nzbdav"
-  local PORT="${PORT_NZBDAV}"
-  mkdir -p "$DIR/config" /mnt/remote/nzbdav
+if has_global_service "pulsarr"; then
+  section "Step 10 - Deploy Pulsarr"
+  PULSARR_DIR="/opt/pulsarr"
+  mkdir -p "$PULSARR_DIR/config"
 
-  cat > "$DIR/docker-compose.yml" << EOF
+  cat > "$PULSARR_DIR/docker-compose.yml" << PULSARR_COMPOSE
+services:
+  pulsarr:
+    image: lakker/pulsarr:latest
+    container_name: pulsarr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ${PULSARR_DIR}/config:/config
+    ports:
+      - "3003:3003"
+    networks:
+      - arr-network
+
+networks:
+  arr-network:
+    name: ${DOCKER_NETWORK}
+    external: true
+PULSARR_COMPOSE
+
+  (cd "$PULSARR_DIR" && docker compose up -d) 2>&1 | tail -3
+  success "Pulsarr deployed on port 3003."
+fi
+
+# =============================================================================
+# STEP 11 - NZBDAV (global, optional)
+# =============================================================================
+if has_global_service "nzbdav"; then
+  section "Step 11 - Deploy NZBDav"
+  NZBDAV_DIR="/opt/nzbdav"
+  mkdir -p "$NZBDAV_DIR/config"
+  mkdir -p /mnt/remote/nzbdav
+
+  cat > "$NZBDAV_DIR/docker-compose.yml" << NZBDAV_COMPOSE
 services:
   nzbdav:
     image: ghcr.io/debridmediamanager/nzbdav:latest
@@ -295,9 +758,9 @@ services:
       - TZ=${TZ}
       - WEBDAV_PASSWORD=${NZBDAV_PASSWORD}
     volumes:
-      - ${DIR}/config:/config
+      - ${NZBDAV_DIR}/config:/config
     ports:
-      - "${PORT}:3000"
+      - "3000:3000"
     networks:
       - arr-network
     healthcheck:
@@ -335,524 +798,166 @@ services:
 
 networks:
   arr-network:
+    name: ${DOCKER_NETWORK}
     external: true
-    name: arr-stack_arr-network
-EOF
-  cd "$DIR" && docker compose up -d nzbdav
-  log "NZBDav deployed on port $PORT"
-  info "NZBDav rclone sidecar will start after NZBDav is healthy"
-  cd "$DIR" && docker compose up -d nzbdav_rclone
-}
+NZBDAV_COMPOSE
 
-# =============================================================================
-# STEP 6 - INSTALL ZURG (per instance)
-# =============================================================================
-install_zurg() {
-  local INST_NAME="$1"
-  local INST_LABEL="$2"
-  local INST_IDX="$3"
-  local PORT=$(get_port $PORT_ZURG $INST_IDX)
-  local DIR="$BASE_DIR/instances/$INST_NAME/zurg"
-  mkdir -p "$DIR"
-
-  step "Installing Zurg for instance: $INST_LABEL (port $PORT)"
-
-  cat > "$DIR/config.yml" << EOF
-# Zurg config for instance: ${INST_LABEL}
-zurg: v1
-token: ${RD_TOKEN}
-port: 9999
-concurrent_workers: 32
-check_for_changes_every_secs: 10
-enable_repair: false
-cache_network_test_results: true
-serve_from_rclone: false
-retain_folder_name_extension: false
-retain_rd_torrent_name: false
-directories:
-  shows:
-    group_order: 15
-    group: media
-    filters:
-      - regex: '(?i)\b(s\d{2}e\d{2}|season\s?\d+|complete.series|miniseries)\b'
-  movies:
-    group_order: 20
-    group: media
-    filters:
-      - regex: '.*'
-EOF
-
-  cat > "$DIR/docker-compose.yml" << EOF
-services:
-  zurg_${INST_NAME}:
-    image: ghcr.io/debridmediamanager/zurg-testing:${ZURG_VERSION}
-    container_name: zurg_${INST_NAME}
-    restart: unless-stopped
-    healthcheck:
-      test: curl -f http://localhost:9999/dav/version.txt || exit 1
-      interval: 10s
-      timeout: 10s
-      retries: 10
-      start_period: 10s
-    volumes:
-      - ${DIR}/config.yml:/app/config.yml
-    ports:
-      - "${PORT}:9999"
-    networks:
-      - arr-network
-
-  rclone_${INST_NAME}:
-    image: rclone/rclone:latest
-    container_name: rclone_${INST_NAME}
-    restart: unless-stopped
-    depends_on:
-      zurg_${INST_NAME}:
-        condition: service_healthy
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
-    devices:
-      - /dev/fuse:/dev/fuse
-    volumes:
-      - /mnt:/mnt:rshared
-    command: >
-      mount
-      :http,url=http://zurg_${INST_NAME}:9999/dav/
-      /mnt/remote/${INST_NAME}
-      --allow-other
-      --dir-cache-time=10s
-      --vfs-cache-mode=full
-      --vfs-cache-max-size=20G
-      --vfs-cache-max-age=24h
-      --buffer-size=32M
-      --log-level=INFO
-    networks:
-      - arr-network
-
-networks:
-  arr-network:
-    external: true
-    name: arr-stack_arr-network
-EOF
-
-  mkdir -p /mnt/remote/$INST_NAME
-  cd "$DIR" && docker compose up -d
-  log "Zurg + Rclone deployed for instance: $INST_LABEL"
-}
-
-# =============================================================================
-# STEP 7 - INSTALL PROWLARR (per instance)
-# =============================================================================
-install_prowlarr() {
-  local INST_NAME="$1"
-  local INST_LABEL="$2"
-  local INST_IDX="$3"
-  local PORT=$(get_port $PORT_PROWLARR $INST_IDX)
-  local DIR="$BASE_DIR/instances/$INST_NAME/prowlarr"
-  mkdir -p "$DIR/config"
-
-  step "Installing Prowlarr for instance: $INST_LABEL (port $PORT)"
-
-  cat >> "$BASE_DIR/instances/$INST_NAME/docker-compose.yml" << EOF
-
-  prowlarr_${INST_NAME}:
-    image: ghcr.io/hotio/prowlarr:release
-    container_name: prowlarr_${INST_NAME}
-    restart: unless-stopped
-    environment:
-      - PUID=0
-      - PGID=0
-      - TZ=${TZ}
-    volumes:
-      - ${DIR}/config:/config
-      - /mnt:/mnt:rshared
-    ports:
-      - "${PORT}:9696"
-    networks:
-      - arr-network
-EOF
-  log "Prowlarr queued for instance: $INST_LABEL on port $PORT"
-}
-
-# =============================================================================
-# STEP 8 - INSTALL RADARR (per instance)
-# =============================================================================
-install_radarr() {
-  local INST_NAME="$1"
-  local INST_LABEL="$2"
-  local INST_IDX="$3"
-  local PORT=$(get_port $PORT_RADARR $INST_IDX)
-  local DIR="$BASE_DIR/instances/$INST_NAME/radarr"
-  mkdir -p "$DIR/config"
-  mkdir -p /mnt/plex/${INST_NAME}/movies
-
-  step "Installing Radarr for instance: $INST_LABEL (port $PORT)"
-
-  cat >> "$BASE_DIR/instances/$INST_NAME/docker-compose.yml" << EOF
-
-  radarr_${INST_NAME}:
-    image: ghcr.io/hotio/radarr:release
-    container_name: radarr_${INST_NAME}
-    restart: unless-stopped
-    environment:
-      - PUID=0
-      - PGID=0
-      - TZ=${TZ}
-    volumes:
-      - ${DIR}/config:/config
-      - /mnt:/mnt:rshared
-    ports:
-      - "${PORT}:7878"
-    networks:
-      - arr-network
-EOF
-  log "Radarr queued for instance: $INST_LABEL on port $PORT"
-}
-
-# =============================================================================
-# STEP 9 - INSTALL SONARR (per instance)
-# =============================================================================
-install_sonarr() {
-  local INST_NAME="$1"
-  local INST_LABEL="$2"
-  local INST_IDX="$3"
-  local PORT=$(get_port $PORT_SONARR $INST_IDX)
-  local DIR="$BASE_DIR/instances/$INST_NAME/sonarr"
-  mkdir -p "$DIR/config"
-  mkdir -p /mnt/plex/${INST_NAME}/tv
-
-  step "Installing Sonarr for instance: $INST_LABEL (port $PORT)"
-
-  cat >> "$BASE_DIR/instances/$INST_NAME/docker-compose.yml" << EOF
-
-  sonarr_${INST_NAME}:
-    image: ghcr.io/hotio/sonarr:release
-    container_name: sonarr_${INST_NAME}
-    restart: unless-stopped
-    environment:
-      - PUID=0
-      - PGID=0
-      - TZ=${TZ}
-    volumes:
-      - ${DIR}/config:/config
-      - /mnt:/mnt:rshared
-    ports:
-      - "${PORT}:8989"
-    networks:
-      - arr-network
-EOF
-  log "Sonarr queued for instance: $INST_LABEL on port $PORT"
-}
-
-# =============================================================================
-# STEP 10 - INSTALL DECYPHARR (per instance)
-# =============================================================================
-install_decypharr() {
-  local INST_NAME="$1"
-  local INST_LABEL="$2"
-  local INST_IDX="$3"
-  local PORT=$(get_port $PORT_DECYPHARR $INST_IDX)
-  local DIR="$BASE_DIR/instances/$INST_NAME/decypharr"
-  mkdir -p "$DIR/config"
-
-  step "Installing Decypharr for instance: $INST_LABEL (port $PORT)"
-
-  # Decypharr config
-  cat > "$DIR/config/config.yml" << EOF
-# Decypharr config for instance: ${INST_LABEL}
-debrid:
-  type: realdebrid
-  api_key: ${RD_TOKEN}
-
-server:
-  port: 8282
-  host: 0.0.0.0
-
-download_dir: /mnt/remote/${INST_NAME}
-EOF
-
-  cat >> "$BASE_DIR/instances/$INST_NAME/docker-compose.yml" << EOF
-
-  decypharr_${INST_NAME}:
-    image: cy01/blackhole:latest
-    container_name: decypharr_${INST_NAME}
-    restart: unless-stopped
-    environment:
-      - TZ=${TZ}
-    volumes:
-      - ${DIR}/config:/config
-      - /mnt:/mnt:rshared
-    ports:
-      - "${PORT}:8282"
-    networks:
-      - arr-network
-EOF
-  log "Decypharr queued for instance: $INST_LABEL on port $PORT"
-}
-
-# =============================================================================
-# STEP 11 - INSTALL PULSARR (per instance)
-# =============================================================================
-install_pulsarr() {
-  local INST_NAME="$1"
-  local INST_LABEL="$2"
-  local INST_IDX="$3"
-  local PORT=$(get_port $PORT_PULSARR $INST_IDX)
-  local DIR="$BASE_DIR/instances/$INST_NAME/pulsarr"
-  mkdir -p "$DIR/config"
-
-  step "Installing Pulsarr for instance: $INST_LABEL (port $PORT)"
-
-  cat >> "$BASE_DIR/instances/$INST_NAME/docker-compose.yml" << EOF
-
-  pulsarr_${INST_NAME}:
-    image: lakker/pulsarr:latest
-    container_name: pulsarr_${INST_NAME}
-    restart: unless-stopped
-    environment:
-      - TZ=${TZ}
-    volumes:
-      - ${DIR}/config:/config
-    ports:
-      - "${PORT}:3003"
-    networks:
-      - arr-network
-EOF
-  log "Pulsarr queued for instance: $INST_LABEL on port $PORT"
-}
-
-# =============================================================================
-# STEP 12 - CREATE DOCKER NETWORK
-# =============================================================================
-step "Step 12 - Create Docker Network"
-
-if ! docker network ls --format '{{.Name}}' | grep -q '^arr-stack_arr-network$'; then
-  docker network create arr-stack_arr-network 2>/dev/null || true
-  log "Docker network created: arr-stack_arr-network"
-else
-  log "Docker network already exists"
+  info "Starting NZBDav..."
+  (cd "$NZBDAV_DIR" && docker compose up -d nzbdav) 2>&1 | tail -3
+  info "Waiting for NZBDav to be healthy before starting rclone sidecar..."
+  WAIT=0
+  while [[ $WAIT -lt 120 ]]; do
+    if curl -sf "http://localhost:3000/" &>/dev/null; then
+      success "NZBDav is healthy."
+      break
+    fi
+    sleep 5; WAIT=$((WAIT + 5))
+  done
+  (cd "$NZBDAV_DIR" && docker compose up -d nzbdav_rclone) 2>&1 | tail -3
+  success "NZBDav deployed on port 3000."
 fi
 
 # =============================================================================
-# STEP 13 - PROCESS INSTANCES
+# STEP 12 - GENERATE STARTUP SCRIPT (same structure as original)
 # =============================================================================
-step "Step 13 - Processing Instances"
+section "Step 12 - Generate Startup Script"
 
-INST_IDX=0
-while IFS='|' read -r INST_NAME INST_LABEL INST_SERVICES; do
-  [[ -z "$INST_NAME" ]] && continue
-
-  step "Setting up instance: $INST_LABEL ($INST_NAME) [index $INST_IDX]"
-  info "Services: $INST_SERVICES"
-
-  INST_DIR="$BASE_DIR/instances/$INST_NAME"
-  mkdir -p "$INST_DIR"
-
-  # Initialize instance docker-compose.yml header
-  cat > "$INST_DIR/docker-compose.yml" << EOF
-# UnlimitedPlex Beta - Instance: ${INST_LABEL}
+cat > /root/startup.sh << 'STARTUP_HEADER'
+#!/bin/bash
+# UnlimitedPlex Beta - Startup Script
 # Auto-generated by setup_beta.sh
 
-services:
-EOF
-
-  # Process each service for this instance
-  IFS=',' read -ra SVCS <<< "$INST_SERVICES"
-  for SVC in "${SVCS[@]}"; do
-    SVC=$(echo "$SVC" | tr -d '[:space:]')
-    case "$SVC" in
-      zurg)       install_zurg       "$INST_NAME" "$INST_LABEL" "$INST_IDX" ;;
-      radarr)     install_radarr     "$INST_NAME" "$INST_LABEL" "$INST_IDX" ;;
-      sonarr)     install_sonarr     "$INST_NAME" "$INST_LABEL" "$INST_IDX" ;;
-      prowlarr)   install_prowlarr   "$INST_NAME" "$INST_LABEL" "$INST_IDX" ;;
-      decypharr)  install_decypharr  "$INST_NAME" "$INST_LABEL" "$INST_IDX" ;;
-      pulsarr)    install_pulsarr    "$INST_NAME" "$INST_LABEL" "$INST_IDX" ;;
-      *) warn "Unknown service: $SVC - skipping" ;;
-    esac
-  done
-
-  # Append network section to instance compose file
-  cat >> "$INST_DIR/docker-compose.yml" << EOF
-
-networks:
-  arr-network:
-    external: true
-    name: arr-stack_arr-network
-EOF
-
-  # Deploy instance
-  progress "Deploying instance: $INST_LABEL..."
-  cd "$INST_DIR" && docker compose up -d 2>&1 | tail -10
-  log "Instance $INST_LABEL deployed"
-
-  INST_IDX=$((INST_IDX + 1))
-done < <(parse_instances)
-
-# =============================================================================
-# STEP 14 - GLOBAL SERVICES
-# =============================================================================
-step "Step 14 - Global Services"
-
-GLOBAL_SERVICES=$(parse_json_list "global_services")
-while IFS= read -r SVC; do
-  [[ -z "$SVC" ]] && continue
-  case "$SVC" in
-    tautulli) install_tautulli ;;
-    nzbdav)   install_nzbdav ;;
-    *) warn "Unknown global service: $SVC - skipping" ;;
-  esac
-done <<< "$GLOBAL_SERVICES"
-
-# =============================================================================
-# STEP 15 - GENERATE STARTUP SCRIPT
-# =============================================================================
-step "Step 15 - Generate Startup Script"
-
-STARTUP_SCRIPT="/root/startup.sh"
-cat > "$STARTUP_SCRIPT" << 'STARTUP_EOF'
-#!/bin/bash
-# UnlimitedPlex Beta - Auto-generated startup script
-# Generated by setup_beta.sh - do not edit manually
-
 LOG="/var/log/unlimitedplex_startup.log"
-echo "[$(date)] Startup script running..." >> "$LOG"
+echo "[$(date)] startup.sh triggered" >> "$LOG"
+
+sleep 15
 
 # Ensure /mnt is shared
-mount --bind /mnt /mnt 2>/dev/null || true
+if ! mountpoint -q /mnt 2>/dev/null; then
+  mount --bind /mnt /mnt 2>/dev/null || true
+fi
 mount --make-shared /mnt 2>/dev/null || true
 modprobe fuse 2>/dev/null || true
 
-# Start Plex
-echo "[$(date)] Starting Plex..." >> "$LOG"
-cd /opt/unlimitedplex/plex && docker compose up -d >> "$LOG" 2>&1
+# Start Zurg + Rclone
+echo "[$(date)] Starting Zurg + Rclone..." >> "$LOG"
+cd /opt/zurg-testing && docker compose up -d >> "$LOG" 2>&1
 
-STARTUP_EOF
-
-# Add instance startups dynamically
-INST_IDX=0
-while IFS='|' read -r INST_NAME INST_LABEL INST_SERVICES; do
-  [[ -z "$INST_NAME" ]] && continue
-  cat >> "$STARTUP_SCRIPT" << EOF
-
-# Start instance: ${INST_LABEL}
-echo "[\$(date)] Starting instance: ${INST_LABEL}..." >> "\$LOG"
-cd $BASE_DIR/instances/$INST_NAME && docker compose up -d >> "\$LOG" 2>&1
-
-# Wait for Zurg/rclone mount if zurg is in this instance
-if echo "$INST_SERVICES" | grep -q "zurg"; then
-  WAIT=0
-  while [[ \$WAIT -lt 120 ]]; do
-    if ls /mnt/remote/$INST_NAME &>/dev/null; then
-      echo "[\$(date)] Mount ready: /mnt/remote/$INST_NAME" >> "\$LOG"
-      break
-    fi
-    sleep 5; WAIT=\$((WAIT + 5))
-  done
-fi
-EOF
-  INST_IDX=$((INST_IDX + 1))
-done < <(parse_instances)
-
-# Add global services to startup
-while IFS= read -r SVC; do
-  [[ -z "$SVC" ]] && continue
-  case "$SVC" in
-    tautulli)
-      cat >> "$STARTUP_SCRIPT" << EOF
-
-# Start Tautulli
-echo "[\$(date)] Starting Tautulli..." >> "\$LOG"
-cd $BASE_DIR/tautulli && docker compose up -d >> "\$LOG" 2>&1
-EOF
-      ;;
-    nzbdav)
-      cat >> "$STARTUP_SCRIPT" << EOF
-
-# Start NZBDav
-echo "[\$(date)] Starting NZBDav..." >> "\$LOG"
-cd $BASE_DIR/nzbdav && docker compose up -d nzbdav >> "\$LOG" 2>&1
+# Wait for Zurg to be healthy
 WAIT=0
-while [[ \$WAIT -lt 120 ]]; do
-  if curl -sf http://localhost:${PORT_NZBDAV}/ &>/dev/null; then
-    echo "[\$(date)] NZBDav ready" >> "\$LOG"
+while [[ $WAIT -lt 300 ]]; do
+  HEALTH=$(docker inspect --format '{{.State.Health.Status}}' zurg 2>/dev/null || echo "unknown")
+  [[ "$HEALTH" == "healthy" ]] && break
+  sleep 10; WAIT=$((WAIT + 10))
+done
+echo "[$(date)] Zurg status: $HEALTH" >> "$LOG"
+
+STARTUP_HEADER
+
+# Add NZBDav startup if enabled (must start before arr-stack)
+if has_global_service "nzbdav"; then
+  cat >> /root/startup.sh << 'NZBDAV_STARTUP'
+
+# Start NZBDav (before arr-stack)
+echo "[$(date)] Starting NZBDav..." >> "$LOG"
+cd /opt/nzbdav && docker compose up -d nzbdav >> "$LOG" 2>&1
+WAIT=0
+while [[ $WAIT -lt 120 ]]; do
+  if curl -sf http://localhost:3000/ &>/dev/null; then
+    echo "[$(date)] NZBDav ready" >> "$LOG"
     break
   fi
-  sleep 5; WAIT=\$((WAIT + 5))
+  sleep 5; WAIT=$((WAIT + 5))
 done
-cd $BASE_DIR/nzbdav && docker compose up -d nzbdav_rclone >> "\$LOG" 2>&1
-EOF
-      ;;
-  esac
-done <<< "$GLOBAL_SERVICES"
+cd /opt/nzbdav && docker compose up -d nzbdav_rclone >> "$LOG" 2>&1
 
-cat >> "$STARTUP_SCRIPT" << 'STARTUP_EOF'
+# Wait for NZBDav mount
+WAIT=0
+while [[ $WAIT -lt 120 ]]; do
+  if ls /mnt/remote/nzbdav &>/dev/null; then
+    echo "[$(date)] NZBDav mount ready" >> "$LOG"
+    break
+  fi
+  sleep 5; WAIT=$((WAIT + 5))
+done
+NZBDAV_STARTUP
+fi
+
+cat >> /root/startup.sh << 'ARR_STARTUP'
+
+# Start arr-stack (all instances)
+echo "[$(date)] Starting arr-stack..." >> "$LOG"
+cd /opt/arr-stack && docker compose up -d >> "$LOG" 2>&1
+
+# Start Decypharr
+echo "[$(date)] Starting Decypharr..." >> "$LOG"
+cd /opt/decypharr && docker compose up -d >> "$LOG" 2>&1
+ARR_STARTUP
+
+# Add optional global services to startup
+if has_global_service "tautulli"; then
+  cat >> /root/startup.sh << 'TAUTULLI_STARTUP'
+
+echo "[$(date)] Starting Tautulli..." >> "$LOG"
+cd /opt/tautulli && docker compose up -d >> "$LOG" 2>&1
+TAUTULLI_STARTUP
+fi
+
+if has_global_service "pulsarr"; then
+  cat >> /root/startup.sh << 'PULSARR_STARTUP'
+
+echo "[$(date)] Starting Pulsarr..." >> "$LOG"
+cd /opt/pulsarr && docker compose up -d >> "$LOG" 2>&1
+PULSARR_STARTUP
+fi
+
+cat >> /root/startup.sh << 'STARTUP_FOOTER'
 
 echo "[$(date)] All services started." >> "$LOG"
-STARTUP_EOF
+STARTUP_FOOTER
 
-chmod +x "$STARTUP_SCRIPT"
+chmod +x /root/startup.sh
 
 # Register cron job
-(crontab -l 2>/dev/null | grep -v startup.sh; echo "@reboot sleep 15 && bash /root/startup.sh") | crontab -
-log "Startup script generated: $STARTUP_SCRIPT"
-log "Cron job registered for @reboot"
-
-# =============================================================================
-# STEP 16 - SAVE INSTANCE MANIFEST
-# =============================================================================
-step "Step 16 - Save Instance Manifest"
-
-MANIFEST="$BASE_DIR/instances.json"
-cp "$CONFIG_FILE" "$MANIFEST"
-log "Instance manifest saved: $MANIFEST"
+CRON_LINE="@reboot sleep 15 && bash /root/startup.sh"
+(crontab -l 2>/dev/null | grep -v "startup.sh"; echo "$CRON_LINE") | crontab -
+success "Startup script written: /root/startup.sh"
+success "Cron job registered: $CRON_LINE"
 
 # =============================================================================
 # COMPLETE - PRINT SUMMARY
 # =============================================================================
-step "Setup Complete!"
+section "Setup Complete!"
 
 echo ""
-echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════════════════════════${NC}"
 echo -e "${BOLD}${GREEN}  UnlimitedPlex Beta - Installation Complete!${NC}"
-echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════════════════════════${NC}"
 echo ""
-echo -e "  ${CYAN}Plex Media Server:${NC}  http://YOUR_IP:${PORT_PLEX}/web"
+echo -e "  ${CYAN}Plex Media Server:${NC}  http://YOUR_IP:32400/web"
+echo -e "  ${CYAN}Zurg:${NC}               http://YOUR_IP:9999"
+echo -e "  ${CYAN}Decypharr:${NC}          http://YOUR_IP:8282"
 echo ""
 
-# Print per-instance services
 INST_IDX=0
-while IFS='|' read -r INST_NAME INST_LABEL INST_SERVICES; do
+while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
   [[ -z "$INST_NAME" ]] && continue
   echo -e "  ${BOLD}${MAGENTA}Instance: $INST_LABEL${NC}"
-  IFS=',' read -ra SVCS <<< "$INST_SERVICES"
-  for SVC in "${SVCS[@]}"; do
-    SVC=$(echo "$SVC" | tr -d '[:space:]')
-    case "$SVC" in
-      zurg)       echo -e "    ${CYAN}Zurg:${NC}       http://YOUR_IP:$(get_port $PORT_ZURG $INST_IDX)" ;;
-      radarr)     echo -e "    ${CYAN}Radarr:${NC}     http://YOUR_IP:$(get_port $PORT_RADARR $INST_IDX)" ;;
-      sonarr)     echo -e "    ${CYAN}Sonarr:${NC}     http://YOUR_IP:$(get_port $PORT_SONARR $INST_IDX)" ;;
-      prowlarr)   echo -e "    ${CYAN}Prowlarr:${NC}   http://YOUR_IP:$(get_port $PORT_PROWLARR $INST_IDX)" ;;
-      decypharr)  echo -e "    ${CYAN}Decypharr:${NC}  http://YOUR_IP:$(get_port $PORT_DECYPHARR $INST_IDX)" ;;
-      pulsarr)    echo -e "    ${CYAN}Pulsarr:${NC}    http://YOUR_IP:$(get_port $PORT_PULSARR $INST_IDX)" ;;
-    esac
-  done
+  instance_has_service "$INST_SVCS" "radarr"   && echo -e "    ${CYAN}Radarr:${NC}    http://YOUR_IP:$(get_port $PORT_RADARR $INST_IDX)"
+  instance_has_service "$INST_SVCS" "sonarr"   && echo -e "    ${CYAN}Sonarr:${NC}    http://YOUR_IP:$(get_port $PORT_SONARR $INST_IDX)"
+  instance_has_service "$INST_SVCS" "prowlarr" && echo -e "    ${CYAN}Prowlarr:${NC}  http://YOUR_IP:$(get_port $PORT_PROWLARR $INST_IDX)"
+  echo -e "    ${CYAN}Plex libs:${NC} /mnt/plex/${INST_LABEL}/{Movies,TV}"
+  echo -e "    ${CYAN}Symlinks:${NC}  /mnt/symlinks/${INST_NAME}_{radarr,sonarr}"
   echo ""
   INST_IDX=$((INST_IDX + 1))
-done < <(parse_instances)
+done < <(get_instances)
 
-# Print global services
-while IFS= read -r SVC; do
-  [[ -z "$SVC" ]] && continue
-  case "$SVC" in
-    tautulli) echo -e "  ${CYAN}Tautulli:${NC}   http://YOUR_IP:${PORT_TAUTULLI}" ;;
-    nzbdav)   echo -e "  ${CYAN}NZBDav:${NC}     http://YOUR_IP:${PORT_NZBDAV}" ;;
-  esac
-done <<< "$GLOBAL_SERVICES"
+has_global_service "tautulli" && echo -e "  ${CYAN}Tautulli:${NC}  http://YOUR_IP:8181"
+has_global_service "pulsarr"  && echo -e "  ${CYAN}Pulsarr:${NC}   http://YOUR_IP:3003"
+has_global_service "nzbdav"   && echo -e "  ${CYAN}NZBDav:${NC}    http://YOUR_IP:3000"
 
 echo ""
-echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "  Log file: $LOG_FILE"
-echo -e "  Config:   $MANIFEST"
-echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════════════════════════${NC}"
+echo -e "  Log: $LOG_FILE"
+echo -e "${BOLD}${GREEN}══════════════════════════════════════════════════════════════════════${NC}"
 echo ""
