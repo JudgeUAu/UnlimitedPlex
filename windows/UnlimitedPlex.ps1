@@ -3,6 +3,14 @@
 # GUI setup for Plex + Real-Debrid + Arr Stack
 # Requires: Windows 10/11, Docker Desktop with WSL2 backend
 
+# WPF requires STA (Single Threaded Apartment) mode - restart if not in STA
+if ([System.Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
+    $scriptPath = $MyInvocation.MyCommand.Path
+    if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -NoProfile -STA -File `"$scriptPath`"" -Verb RunAs
+    exit
+}
+
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
