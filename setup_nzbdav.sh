@@ -243,12 +243,10 @@ services:
         --allow-other
         --links
         --use-cookies
-        --vfs-cache-mode=full
-        --vfs-cache-max-size=20G
-        --vfs-cache-max-age=24h
-        --buffer-size=0M
-        --vfs-read-ahead=512M
+        --vfs-cache-mode=off
+        --buffer-size=32M
         --dir-cache-time=20s
+        --no-checksum
     networks:
       - ${NETWORK_NAME}
 
@@ -311,12 +309,10 @@ services:
         --allow-other
         --links
         --use-cookies
-        --vfs-cache-mode=full
-        --vfs-cache-max-size=20G
-        --vfs-cache-max-age=24h
-        --buffer-size=0M
-        --vfs-read-ahead=512M
+        --vfs-cache-mode=off
+        --buffer-size=32M
         --dir-cache-time=20s
+        --no-checksum
     networks:
       - nzbdav
 
