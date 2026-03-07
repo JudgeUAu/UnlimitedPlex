@@ -756,6 +756,9 @@ if has_global_service "nzbdav"; then
   mkdir -p "$NZBDAV_DIR/config"
   mkdir -p /mnt/remote/nzbdav
 
+  # Obscure the password for rclone WebDAV (rclone requires obscured passwords)
+  NZBDAV_PASS_OBSCURED=$(docker run --rm rclone/rclone:latest obscure "${NZBDAV_PASSWORD}" 2>/dev/null || echo "${NZBDAV_PASSWORD}")
+
   cat > "$NZBDAV_DIR/docker-compose.yml" << NZBDAV_COMPOSE
 services:
   nzbdav:
@@ -792,15 +795,15 @@ services:
       - /dev/fuse:/dev/fuse
     volumes:
       - /mnt:/mnt:rshared
-    command: >
-      mount
-      :webdav,url=http://nzbdav:3000/,user=nzbdav,pass=${NZBDAV_PASSWORD}
-      /mnt/remote/nzbdav
-      --allow-other
-      --vfs-cache-mode=off
-      --buffer-size=32M
-      --no-checksum
-      --log-level=INFO
+    command:
+      - mount
+      - ":webdav,url=http://nzbdav:3000/,user=nzbdav,pass=${NZBDAV_PASS_OBSCURED}"
+      - /mnt/remote/nzbdav
+      - --allow-other
+      - --vfs-cache-mode=off
+      - --buffer-size=32M
+      - --no-checksum
+      - --log-level=INFO
     networks:
       - arr-network
 
