@@ -756,18 +756,16 @@ if has_global_service "nzbdav"; then
   mkdir -p "$NZBDAV_DIR/config"
   mkdir -p /mnt/remote/nzbdav
 
-  # Obscure the password for rclone WebDAV (rclone requires obscured passwords)
-  NZBDAV_PASS_OBSCURED=$(docker run --rm rclone/rclone:latest obscure "${NZBDAV_PASSWORD}" 2>/dev/null || echo "${NZBDAV_PASSWORD}")
-
   cat > "$NZBDAV_DIR/docker-compose.yml" << NZBDAV_COMPOSE
 services:
   nzbdav:
-    image: ghcr.io/debridmediamanager/nzbdav:latest
+    image: nzbdav/nzbdav:alpha
     container_name: nzbdav
     restart: unless-stopped
     environment:
       - TZ=${TZ}
-      - WEBDAV_PASSWORD=${NZBDAV_PASSWORD}
+      - PUID=${PUID}
+      - PGID=${PGID}
     volumes:
       - ${NZBDAV_DIR}/config:/config
     ports:
@@ -775,10 +773,11 @@ services:
     networks:
       - arr-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 30s
 
   nzbdav_rclone:
     image: rclone/rclone:latest
@@ -797,7 +796,7 @@ services:
       - /mnt:/mnt:rshared
     command:
       - mount
-      - ":webdav,url=http://nzbdav:3000/,user=nzbdav,pass=${NZBDAV_PASS_OBSCURED}"
+      - ":webdav,url=http://nzbdav:3000/dav/,user=nzbdav,pass=${NZBDAV_PASSWORD}"
       - /mnt/remote/nzbdav
       - --allow-other
       - --vfs-cache-mode=off
@@ -815,7 +814,7 @@ NZBDAV_COMPOSE
 
   info "Starting NZBDav..."
   (cd "$NZBDAV_DIR" && docker compose up -d nzbdav) 2>&1 | tail -3
-  info "Waiting for NZBDav to be healthy before starting rclone sidecar..."
+  info "Waiting for NZBDav to be healthy (up to 2 min)..."
   WAIT=0
   while [[ $WAIT -lt 120 ]]; do
     if curl -sf "http://localhost:3000/" &>/dev/null; then
@@ -824,8 +823,11 @@ NZBDAV_COMPOSE
     fi
     sleep 5; WAIT=$((WAIT + 5))
   done
+  info "Starting NZBDav rclone sidecar..."
   (cd "$NZBDAV_DIR" && docker compose up -d nzbdav_rclone) 2>&1 | tail -3
   success "NZBDav deployed on port 3000."
+  warn "NOTE: Open http://YOUR_IP:3000 to configure your usenet provider credentials."
+  warn "      After configuring, set WebDAV user=nzbdav password=${NZBDAV_PASSWORD} in NZBDav settings."
 fi
 
 # =============================================================================
