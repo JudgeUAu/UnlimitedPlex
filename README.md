@@ -12,9 +12,12 @@
 | `setup_plex_debrid.sh` | Base setup — Docker, Zurg, Rclone, Plex, plex_debrid |
 | `setup_arr_stack.sh` | *Arr stack upgrade — Sonarr, Radarr, Prowlarr, Overseerr, Decypharr |
 | `setup_nzbdav.sh` | NZBDav setup — Usenet streaming via WebDAV |
+| `fix_startup.sh` | Patches `/root/startup.sh` on existing installs (boot order fix) |
 | `configure_arrs.sh` | Standalone re-configuration script for arr apps |
 | `verify_setup.sh` | Health check — verifies every component after setup or reboot |
+| `install.sh` | Remote bootstrap — run from GitHub with PAT token |
 | `README.md` | This documentation |
+| `ARR_STACK_INSTRUCTIONS.md` | Detailed step-by-step arr stack configuration guide |
 
 ---
 
@@ -68,7 +71,7 @@ Torrent content (via Decypharr):
 Usenet content (via NZBDav):
     → Sonarr/Radarr searches via Prowlarr (Usenet indexers)
     → NZB file sent to NZBDav (SABnzbd API mock)
-    → NZBDav mounts NZB onto WebDAV (no downloading!)
+    → NZBDav streams NZB via WebDAV (no downloading!)
     → Rclone sidecar mounts NZBDav WebDAV to /mnt/remote/nzbdav/
     → NZBDav creates symlinks in /mnt/remote/nzbdav/completed-symlinks/
     → Sonarr/Radarr imports symlinks to /mnt/plex/
@@ -93,7 +96,7 @@ Usenet content (via NZBDav):
 | NZBDav | 3000 | http://localhost:3000 | Option 3 only |
 
 > **⚠️ Docker Networking:** The `localhost` URLs above are for your **browser only**. When configuring services to talk to **each other** inside Docker (e.g., Prowlarr → Sonarr, Overseerr → Radarr), use **container names**:
-> `http://sonarr:8989`, `http://radarr:7878`, `http://prowlarr:9696`, `http://nzbdav:3000`, etc.
+> `http://sonarr:8989`, `http://radarr:7878`, `http://prowlarr:9696`, `http://nzbdav:3000`, `http://flaresolverr:8191`, etc.
 > Inside a container, `localhost` refers to that container itself, not the host.
 
 ---
@@ -112,26 +115,33 @@ Usenet content (via NZBDav):
 
 ## Quick Start
 
-### 1. Copy files to your server
+### Option A — Remote Install (from GitHub)
 
 ```bash
-# Option A – copy the zip via scp and extract
-scp plex_debrid_setup.zip root@YOUR_SERVER_IP:/root/
-ssh root@YOUR_SERVER_IP "cd /root && unzip -o plex_debrid_setup.zip"
-
-# Option B – copy individual files
-scp setup.sh setup_plex_debrid.sh setup_arr_stack.sh setup_nzbdav.sh verify_setup.sh root@YOUR_SERVER_IP:/root/
+GITHUB_TOKEN="your_pat_token" bash <(curl -fsSL \
+  -H "Authorization: token your_pat_token" \
+  https://raw.githubusercontent.com/JudgeUAu/UnlimitedPlex/main/install.sh)
 ```
 
-### 2. Make it executable
+### Option B — Copy zip to server
+
+```bash
+# Copy and extract
+scp plex_debrid_setup.zip root@YOUR_SERVER_IP:/root/
+ssh root@YOUR_SERVER_IP "cd /root && unzip -o plex_debrid_setup.zip"
+```
+
+### Option C — Copy individual files
+
+```bash
+scp setup.sh setup_plex_debrid.sh setup_arr_stack.sh setup_nzbdav.sh \
+    fix_startup.sh verify_setup.sh root@YOUR_SERVER_IP:/root/
+```
+
+### Run the setup
 
 ```bash
 chmod +x /root/setup.sh
-```
-
-### 3. Run it
-
-```bash
 sudo /root/setup.sh
 ```
 
@@ -147,7 +157,7 @@ You'll see a menu:
 > sudo ./setup_nzbdav.sh         # Add NZBDav to existing arr stack
 > ```
 
-### 4. Interactive prompts
+### Interactive prompts
 
 The script will ask for:
 - Your **Real-Debrid API token**
@@ -183,18 +193,18 @@ sudo RD_API_TOKEN="your_rd_token" PLEX_TOKEN="your_plex_token" /root/setup.sh
 1. **Updates Zurg config** — Enables `serve_from_rclone: true` for symlink workflow
 2. **Directory structure** — Creates `/mnt/plex/`, `/mnt/symlinks/`, `/mnt/remote/realdebrid/`
 3. **Updates Rclone mount** — Exposes `__all__` torrents at `/mnt/remote/realdebrid/`
-4. **Deploys Docker containers** — Sonarr, Sonarr 4K, Radarr, Radarr 4K, Prowlarr, Overseerr, Pulsarr (all on `arr-stack` network)
+4. **Deploys Docker containers** — Sonarr, Sonarr 4K, Radarr, Radarr 4K, Prowlarr, Overseerr, Pulsarr (all on `arr-stack` network, with `/mnt:/mnt:rshared` volume mounts)
 5. **Deploys Decypharr** — qBittorrent API mock for Real-Debrid at `/opt/decypharr/`
 6. **Installs Torrentio indexer** — Custom Prowlarr indexer for debrid-cached torrents
 7. **Auto-configures arr apps** — Adds root folders, download clients, and Prowlarr connections via API
-8. **Updates startup script** — Adds all new services to boot automation
+8. **Updates startup script** — Correct boot order: Zurg → NZBDav → arr-stack → Decypharr
 
 ### NZBDav Adds (Option 3 only)
 
 1. **Creates directories** — `/opt/nzbdav/config` and `/mnt/remote/nzbdav/` mount point
 2. **Generates Rclone config** — Auto-obscures WebDAV password for Rclone
 3. **Deploys NZBDav container** — WebDAV streaming server at port 3000
-4. **Deploys Rclone sidecar** — Mounts NZBDav WebDAV to `/mnt/remote/nzbdav/` with optimized streaming flags
+4. **Deploys Rclone sidecar** — Mounts NZBDav WebDAV to `/mnt/remote/nzbdav/` with optimised streaming flags
 5. **Connects to arr-stack network** — Allows Sonarr/Radarr to reach NZBDav by hostname
 6. **Auto-configures arr apps** — Adds NZBDav as SABnzbd download client to all arr apps
 
@@ -243,7 +253,7 @@ Follow the wizard, then detach: `Ctrl+A, D`
 ### Step 1 — Configure Prowlarr (http://localhost:9696)
 
 1. Set up authentication (Settings → General)
-2. Add **Torrentio** indexer (auto-installed at `/opt/prowlarr/Definitions/Custom/torrentio.yml`)
+2. Verify **Torrentio** indexer is present (auto-installed)
 3. *(Option 3)* Add your **Usenet indexers** (NZBGeek, NZBFinder, etc.)
 4. Connect to Sonarr & Radarr (Settings → Apps):
 
@@ -256,19 +266,25 @@ Follow the wizard, then detach: `Ctrl+A, D`
 
 ### Step 2 — Configure Radarr (http://localhost:7878)
 
-1. Set authentication, add root folder `/mnt/plex/Movies`
+1. Set authentication, verify root folder `/mnt/plex/Movies`
 2. Verify **Decypharr [RD]** download client is present (auto-configured)
 3. *(Option 3)* Verify **NZBDav** download client is present (auto-configured)
 4. Copy API key for Prowlarr
 
 ### Step 3 — Configure Sonarr (http://localhost:8989)
 
-1. Set authentication, add root folder `/mnt/plex/TV`
+1. Set authentication, verify root folder `/mnt/plex/TV`
 2. Verify **Decypharr [RD]** download client is present (auto-configured)
 3. *(Option 3)* Verify **NZBDav** download client is present (auto-configured)
 4. Copy API key for Prowlarr
 
-### Step 4 — Configure Pulsarr (http://localhost:3003)
+### Step 4 — Configure Decypharr (http://localhost:8282)
+
+1. Go to **Settings → Debrid** — verify Real-Debrid API key and mount path `/mnt/remote/realdebrid/__all__`
+2. Go to **Settings → qBittorrent** — verify download folder `/mnt/symlinks`
+3. Go to **Settings → Repair** — enable Scheduled Repair (interval: 6h)
+
+### Step 5 — Configure Pulsarr (http://localhost:3003)
 
 1. Open the web UI and follow the setup wizard
 2. Connect to Plex (enter your Plex token)
@@ -277,14 +293,14 @@ Follow the wizard, then detach: `Ctrl+A, D`
 5. Select which Plex users' watchlists to monitor
 6. Users just add to their Plex watchlist → Pulsarr handles the rest!
 
-### Step 5 — Configure Overseerr (http://localhost:5055) *(Optional)*
+### Step 6 — Configure Overseerr (http://localhost:5055) *(Optional)*
 
 1. Sign in with Plex account
 2. Add Radarr server (Hostname: `radarr`, Port: `7878`)
 3. Add Sonarr server (Hostname: `sonarr`, Port: `8989`)
 4. Optionally add 4K servers (Hostname: `radarr4k`/`sonarr4k`)
 
-### Step 6 — Update Plex Libraries
+### Step 7 — Update Plex Libraries
 
 Point libraries to the symlink paths:
 - **Movies** → `/mnt/plex/Movies`
@@ -328,16 +344,43 @@ Add each arr app:
 | Sonarr | `http://sonarr:8989` | 8989 | From Sonarr Settings → General |
 | Sonarr 4K | `http://sonarr4k:8989` | 8990 | From Sonarr 4K Settings → General |
 
-Configure **Automatic Queue Management** rules (Settings → Radarr/Sonarr):
-- **Remove, Blocklist, and Search:** No files found eligible for import / No audio tracks / Sample
-- **Remove and Blocklist:** Not an upgrade for existing file
-- **Remove:** Episode/Movie file already imported
-
 ### Step 6 — Verify NZBDav Mount
 
 ```bash
 ls -la /mnt/remote/nzbdav/
 # Should show: .ids  completed-symlinks  content  nzbs
+```
+
+---
+
+## Boot & Startup Behaviour
+
+The setup script installs `/root/startup.sh` which runs at boot via cron (`@reboot`). It starts all services in the correct order:
+
+```
+1. /mnt set as shared mount       (required for rshared propagation into containers)
+2. Zurg + Rclone started          (Real-Debrid)
+3. Wait for Zurg healthy
+4. Wait for /mnt/remote/realdebrid ready
+5. NZBDav started                 (if installed)
+6. Wait for NZBDav healthy
+7. NZBDav rclone sidecar started
+8. Wait for /mnt/remote/nzbdav ready  ← arr-stack waits for this!
+9. *arr stack started             (Radarr/Sonarr/Prowlarr/etc)
+10. Decypharr started
+```
+
+> **Why this order matters:** Arr containers use `/mnt:/mnt:rshared` volume mounts. If arr containers start before `/mnt/remote/nzbdav/` is mounted, Radarr/Sonarr will report *"directory does not appear to exist inside the container"*. The startup script waits for the mount to be ready before starting arr containers.
+
+### Check startup log
+```bash
+cat /var/log/startup_arr_stack.log
+```
+
+### Fix existing installs (if installed before this update)
+```bash
+sudo bash /root/fix_startup.sh
+sudo reboot
 ```
 
 ---
@@ -490,32 +533,44 @@ chmod +x /root/verify_setup.sh
 
 ## Troubleshooting
 
+### "Directory does not appear to exist inside the container" (NZBDav)
+
+Arr containers started before `/mnt/remote/nzbdav/` was mounted.
+
+```bash
+# Fix immediately (restart arr-stack after mount is ready)
+ls /mnt/remote/nzbdav/   # verify mount is up first
+cd /opt/arr-stack && docker compose restart
+
+# Permanent fix (update startup script)
+sudo bash /root/fix_startup.sh
+sudo reboot
+```
+
 ### Stale mount (Input/output error)
 
 ```bash
 cd /opt/zurg-testing && docker compose down
-sudo fusermount -uz /mnt/zurg
-sudo umount -l /mnt/zurg
-sudo rm -rf /mnt/zurg && sudo mkdir -p /mnt/zurg
-sudo mount --bind /mnt /mnt
-sudo mount --make-shared /mnt
-docker compose up -d
+sudo fusermount -uz /mnt/remote/realdebrid
+sudo umount -l /mnt/remote/realdebrid 2>/dev/null || true
+sudo mount --bind /mnt /mnt && sudo mount --make-shared /mnt
+cd /opt/zurg-testing && docker compose up -d
 ```
 
 ### Decypharr symlinks not importing
 
-Decypharr creates a nested directory structure that Radarr/Sonarr can't import. Fix by restarting the arr-stack:
-
 ```bash
-cd /opt/arr-stack && docker compose restart
-```
+# Check logs
+docker logs decypharr --tail 50
 
-If the issue persists, check the symlink structure:
-```bash
-ls -laR /mnt/symlinks/radarr4k/
-```
+# Check port type (must be string)
+grep '"port"' /opt/decypharr/config.json
+# Should show: "port": "8282"  (with quotes around 8282)
 
-The symlink should point to a valid file in `/mnt/remote/realdebrid/__all__/`.
+# Fix if needed
+sed -i 's/"port": 8282/"port": "8282"/g' /opt/decypharr/config.json
+docker restart decypharr
+```
 
 ### Prowlarr can't connect to Sonarr/Radarr
 
@@ -531,6 +586,7 @@ The symlink should point to a valid file in `/mnt/remote/realdebrid/__all__/`.
 | Overseerr | `http://overseerr:5055` |
 | Decypharr | `http://decypharr:8282` |
 | NZBDav | `http://nzbdav:3000` |
+| FlareSolverr | `http://flaresolverr:8191` |
 
 Verify all containers are on the same network:
 ```bash
@@ -576,14 +632,21 @@ sed -i 's/"port": 8282/"port": "8282"/g' /opt/decypharr/config.json
 docker restart decypharr
 ```
 
-### After reboot, mount not working
+### After reboot, services not starting
 
 ```bash
-sudo mount --bind /mnt /mnt
-sudo mount --make-shared /mnt
-cd /opt/zurg-testing && docker compose restart
-cd /opt/arr-stack && docker compose restart
-cd /opt/nzbdav && docker compose restart  # Option 3 only
+# Run startup script manually
+sudo /root/startup.sh
+
+# Check log
+cat /var/log/startup_arr_stack.log
+
+# Or start manually in order
+sudo mount --bind /mnt /mnt && sudo mount --make-shared /mnt
+cd /opt/zurg-testing && docker compose up -d
+cd /opt/nzbdav && docker compose up -d          # Option 3 only
+cd /opt/arr-stack && docker compose up -d
+cd /opt/decypharr && docker compose up -d
 ```
 
 ### Docker permission issues
@@ -609,34 +672,36 @@ curl -fsSL https://get.docker.com | sh
 ### Core Services
 ```bash
 docker ps                                        # All containers
-docker logs zurg-testing-zurg-1 --tail 50 -f     # Zurg logs
-docker logs zurg-testing-rclone-1 --tail 50 -f   # Rclone logs
-cd /opt/zurg-testing && docker compose restart    # Restart Zurg + Rclone
-systemctl status plexmediaserver                  # Plex status
+docker logs zurg --tail 50 -f                    # Zurg logs
+docker logs rclone --tail 50 -f                  # Rclone logs
+cd /opt/zurg-testing && docker compose restart   # Restart Zurg + Rclone
+systemctl status plexmediaserver                 # Plex status
 ```
 
 ### Arr Stack
 ```bash
-docker logs radarr --tail 50 -f                   # Radarr logs
-docker logs sonarr --tail 50 -f                   # Sonarr logs
-docker logs prowlarr --tail 50 -f                 # Prowlarr logs
-docker logs decypharr --tail 50 -f                # Decypharr logs
-docker logs pulsarr --tail 50 -f                  # Pulsarr logs
-cd /opt/arr-stack && docker compose restart        # Restart all *arrs
+docker logs radarr --tail 50 -f                  # Radarr logs
+docker logs sonarr --tail 50 -f                  # Sonarr logs
+docker logs prowlarr --tail 50 -f                # Prowlarr logs
+docker logs decypharr --tail 50 -f               # Decypharr logs
+docker logs pulsarr --tail 50 -f                 # Pulsarr logs
+cd /opt/arr-stack && docker compose restart      # Restart all *arrs
+cd /opt/decypharr && docker compose restart      # Restart Decypharr
 ```
 
 ### NZBDav
 ```bash
-docker logs nzbdav --tail 50 -f                   # NZBDav logs
-docker logs nzbdav_rclone --tail 50 -f            # NZBDav Rclone logs
-cd /opt/nzbdav && docker compose restart           # Restart NZBDav
-ls -la /mnt/remote/nzbdav/                        # Check mount
-curl http://localhost:3000/health                  # Health check
+docker logs nzbdav --tail 50 -f                  # NZBDav logs
+docker logs nzbdav_rclone --tail 50 -f           # NZBDav Rclone logs
+cd /opt/nzbdav && docker compose restart         # Restart NZBDav
+ls -la /mnt/remote/nzbdav/                       # Check mount
+curl http://localhost:3000/health                 # Health check
 ```
 
 ### Health Check
 ```bash
 /root/verify_setup.sh
+cat /var/log/startup_arr_stack.log               # Boot log
 ```
 
 ---
@@ -664,3 +729,4 @@ curl http://localhost:3000/health                  # Health check
 - [NZBDav (Usenet WebDAV streaming)](https://github.com/nzbdav-dev/nzbdav)
 - [FlareSolverr (Cloudflare bypass)](https://github.com/FlareSolverr/FlareSolverr)
 - [Prowlarr Torrentio Indexer](https://github.com/dreulavelle/Prowlarr-Indexers)
+- [Trash Guides](https://trash-guides.info/)
