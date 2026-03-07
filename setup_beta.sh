@@ -602,68 +602,76 @@ DECYPHARR_COMPOSE
 
 info "Building Decypharr config.json with all arr instances..."
 
-# Build arrs JSON array dynamically
-ARRS_JSON=""
-INST_IDX=0
+# Use Python to generate valid JSON - avoids all shell quoting issues
+INST_PIPE_DATA=""
 while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
   [[ -z "$INST_NAME" ]] && continue
-
-  if instance_has_service "$INST_SVCS" "radarr"; then
-    [[ -n "$ARRS_JSON" ]] && ARRS_JSON="${ARRS_JSON},"
-    ARRS_JSON="${ARRS_JSON}
-    {
-      &quot;name&quot;: &quot;radarr_${INST_NAME}&quot;,
-      &quot;type&quot;: &quot;radarr&quot;,
-      &quot;host&quot;: &quot;http://radarr_${INST_NAME}:7878&quot;,
-      &quot;api_key&quot;: &quot;&quot;,
-      &quot;download_folder&quot;: &quot;/mnt/symlinks/${INST_NAME}_radarr&quot;
-    }"
-  fi
-
-  if instance_has_service "$INST_SVCS" "sonarr"; then
-    [[ -n "$ARRS_JSON" ]] && ARRS_JSON="${ARRS_JSON},"
-    ARRS_JSON="${ARRS_JSON}
-    {
-      &quot;name&quot;: &quot;sonarr_${INST_NAME}&quot;,
-      &quot;type&quot;: &quot;sonarr&quot;,
-      &quot;host&quot;: &quot;http://sonarr_${INST_NAME}:8989&quot;,
-      &quot;api_key&quot;: &quot;&quot;,
-      &quot;download_folder&quot;: &quot;/mnt/symlinks/${INST_NAME}_sonarr&quot;
-    }"
-  fi
-
-  INST_IDX=$((INST_IDX + 1))
+  [[ -n "$INST_PIPE_DATA" ]] && INST_PIPE_DATA="${INST_PIPE_DATA};"
+  INST_PIPE_DATA="${INST_PIPE_DATA}${INST_NAME}|${INST_LABEL}|${INST_SVCS}"
 done < <(get_instances)
 
-cat > "$DECYPHARR_DIR/config.json" << DECYPHARR_CONFIG
-{
-  "port": "8282",
-  "download_folder": "/mnt/symlinks",
-  "log_level": "info",
-  "debrids": [
-    {
-      "name": "realdebrid",
-      "type": "realdebrid",
-      "api_key": "${RD_TOKEN}",
-      "mount_path": "/mnt/remote/realdebrid/__all__",
-      "download_uncached": false
-    }
-  ],
-  "arrs": [${ARRS_JSON}
-  ],
-  "qbittorrent": {
+python3 - "$DECYPHARR_DIR/config.json" "$RD_TOKEN" "$INST_PIPE_DATA" << 'DECYPHARR_PY'
+import json, sys
+
+config_file = sys.argv[1]
+rd_token = sys.argv[2]
+inst_data = sys.argv[3]
+
+arrs = []
+if inst_data.strip():
+    for entry in inst_data.split(";"):
+        parts = entry.split("|")
+        if len(parts) < 3:
+            continue
+        inst_name = parts[0]
+        inst_svcs = parts[2].split(",")
+        if "radarr" in inst_svcs:
+            arrs.append({
+                "name": f"radarr_{inst_name}",
+                "type": "radarr",
+                "host": f"http://radarr_{inst_name}:7878",
+                "api_key": "",
+                "download_folder": f"/mnt/symlinks/{inst_name}_radarr"
+            })
+        if "sonarr" in inst_svcs:
+            arrs.append({
+                "name": f"sonarr_{inst_name}",
+                "type": "sonarr",
+                "host": f"http://sonarr_{inst_name}:8989",
+                "api_key": "",
+                "download_folder": f"/mnt/symlinks/{inst_name}_sonarr"
+            })
+
+config = {
     "port": "8282",
-    "download_folder": "/mnt/symlinks"
-  },
-  "rclone": {
-    "enabled": false
-  },
-  "repair": {
-    "enabled": true,
-    "interval": "6h"
-  }
+    "download_folder": "/mnt/symlinks",
+    "log_level": "info",
+    "debrids": [
+        {
+            "name": "realdebrid",
+            "type": "realdebrid",
+            "api_key": rd_token,
+            "mount_path": "/mnt/remote/realdebrid/__all__",
+            "download_uncached": False
+        }
+    ],
+    "arrs": arrs,
+    "qbittorrent": {
+        "port": "8282",
+        "download_folder": "/mnt/symlinks"
+    },
+    "rclone": {
+        "enabled": False
+    },
+    "repair": {
+        "enabled": True,
+        "interval": "6h"
+    }
 }
-DECYPHARR_CONFIG
+
+with open(config_file, "w") as f:
+    json.dump(config, f, indent=2)
+DECYPHARR_PY
 success "Decypharr config.json written."
 
 info "Starting Decypharr..."

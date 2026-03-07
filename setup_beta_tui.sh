@@ -225,35 +225,63 @@ if ! whiptail --title "Confirm Installation" \
 fi
 
 # =============================================================================
-# GENERATE CONFIG JSON
+# GENERATE CONFIG JSON (using Python to avoid shell quoting issues)
 # =============================================================================
-# Build instances JSON
-INST_JSON=""
+
+# Build pipe-delimited instance data for Python
+INST_DATA=""
 for inst in "${INSTANCES[@]}"; do
-  IFS='|' read -r INAME ILABEL ISVCS <<< "$inst"
-  SVCS_JSON=$(echo "$ISVCS" | tr ',' '\n' | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
-  [[ -n "$INST_JSON" ]] && INST_JSON="${INST_JSON},"
-  INST_JSON="${INST_JSON}{&quot;name&quot;:&quot;${INAME}&quot;,&quot;label&quot;:&quot;${ILABEL}&quot;,&quot;services&quot;:${SVCS_JSON}}"
+  [[ -n "$INST_DATA" ]] && INST_DATA="${INST_DATA};"
+  INST_DATA="${INST_DATA}${inst}"
 done
 
-# Build global services JSON
-GLOBAL_JSON=""
+# Build comma-delimited global services for Python
+GLOBAL_DATA=""
 for svc in "${GLOBAL_SERVICES[@]}"; do
-  [[ -n "$GLOBAL_JSON" ]] && GLOBAL_JSON="${GLOBAL_JSON},"
-  GLOBAL_JSON="${GLOBAL_JSON}&quot;${svc}&quot;"
+  [[ -n "$GLOBAL_DATA" ]] && GLOBAL_DATA="${GLOBAL_DATA},"
+  GLOBAL_DATA="${GLOBAL_DATA}${svc}"
 done
 
-cat > "$CONFIG_FILE" << JSONEOF
-{
-  "rd_token": "${RD_TOKEN}",
-  "plex_token": "${PLEX_TOKEN}",
-  "timezone": "${TIMEZONE}",
-  "zurg_version": "${ZURG_VERSION}",
-  "nzbdav_password": "${NZBDAV_PASSWORD}",
-  "instances": [${INST_JSON}],
-  "global_services": [${GLOBAL_JSON}]
+python3 - "$CONFIG_FILE" "$RD_TOKEN" "$PLEX_TOKEN" "$TIMEZONE" "$ZURG_VERSION" "$NZBDAV_PASSWORD" "$INST_DATA" "$GLOBAL_DATA" << 'PYEOF'
+import json, sys
+
+config_file = sys.argv[1]
+rd_token = sys.argv[2]
+plex_token = sys.argv[3]
+timezone = sys.argv[4]
+zurg_version = sys.argv[5]
+nzbdav_password = sys.argv[6]
+inst_data = sys.argv[7]
+global_data = sys.argv[8]
+
+# Parse instances: "name|label|svc1,svc2;name2|label2|svc1"
+instances = []
+if inst_data.strip():
+    for entry in inst_data.split(";"):
+        parts = entry.split("|")
+        if len(parts) == 3:
+            instances.append({
+                "name": parts[0],
+                "label": parts[1],
+                "services": [s.strip() for s in parts[2].split(",") if s.strip()]
+            })
+
+# Parse global services: "tautulli,pulsarr,nzbdav"
+global_services = [s.strip() for s in global_data.split(",") if s.strip()] if global_data.strip() else []
+
+config = {
+    "rd_token": rd_token,
+    "plex_token": plex_token,
+    "timezone": timezone,
+    "zurg_version": zurg_version,
+    "nzbdav_password": nzbdav_password,
+    "instances": instances,
+    "global_services": global_services
 }
-JSONEOF
+
+with open(config_file, "w") as f:
+    json.dump(config, f, indent=2)
+PYEOF
 
 echo -e "${GREEN}[OK]${NC} Config written to $CONFIG_FILE"
 
