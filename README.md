@@ -8,7 +8,7 @@
 
 | File | Purpose |
 |------|---------|
-| `setup.sh` | **🚀 Start here!** Unified launcher with setup menu |
+| `setup.sh` | **🚀 Start here! (Linux)** Unified launcher with setup menu |
 | `setup_plex_debrid.sh` | Base setup — Docker, Zurg, Rclone, Plex, plex_debrid |
 | `setup_arr_stack.sh` | *Arr stack upgrade — Sonarr, Radarr, Prowlarr, Overseerr, Decypharr |
 | `setup_nzbdav.sh` | NZBDav setup — Usenet streaming via WebDAV |
@@ -18,6 +18,25 @@
 | `install.sh` | Remote bootstrap — run from GitHub with PAT token |
 | `README.md` | This documentation |
 | `ARR_STACK_INSTRUCTIONS.md` | Detailed step-by-step arr stack configuration guide |
+| `windows/Launch-UnlimitedPlex.bat` | **🪟 Start here! (Windows)** Double-click launcher |
+| `windows/UnlimitedPlex.ps1` | Windows GUI installer (PowerShell WPF) |
+| `windows/README-Windows.md` | Windows-specific setup guide |
+
+---
+
+## 🪟 Windows Users
+
+A full graphical installer is available for Windows 10/11!
+
+**Requirements:** Docker Desktop + WSL2 + Ubuntu
+
+**To install:**
+1. Install WSL2: open PowerShell as Admin and run `wsl --install`
+2. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend
+3. Right-click `windows/Launch-UnlimitedPlex.bat` → **Run as Administrator**
+4. The GUI will guide you through the rest
+
+See `windows/README-Windows.md` for the full Windows guide.
 
 ---
 
