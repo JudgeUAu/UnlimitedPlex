@@ -1,4 +1,4 @@
-# Plex + Real-Debrid Automated Setup
+# Unlimated Plex Semi-Automated Setup
 
 > One script to set up a complete Plex media server powered by Real-Debrid, with optional Sonarr/Radarr/Prowlarr and Usenet (NZBDav) integration.
 
