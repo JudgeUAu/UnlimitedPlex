@@ -893,7 +893,7 @@ section "Step 9 – Update Startup Script"
 info "Updating /root/startup.sh for arr stack..."
 cat > /root/startup.sh << 'STARTUP_SCRIPT'
 #!/bin/bash
-# startup.sh – Updated for *arr stack with Decypharr
+# startup.sh – *arr stack with Decypharr + NZBDav
 # Launched at boot via cron (@reboot)
 
 LOG="/var/log/startup_arr_stack.log"
@@ -902,17 +902,18 @@ echo "[$(date)] startup.sh triggered" >> "$LOG"
 # Wait for system to settle
 sleep 15
 
-# Ensure /mnt is a shared mount
+# Ensure /mnt is a shared mount (required for rshared propagation into containers)
 if ! mountpoint -q /mnt 2>/dev/null; then
   mount --bind /mnt /mnt 2>/dev/null || true
 fi
 mount --make-shared /mnt 2>/dev/null || true
+echo "[$(date)] /mnt set as shared mount." >> "$LOG"
 
-# Start Zurg + Rclone
+# ── Start Zurg + Rclone (Real-Debrid) ────────────────────────────────────────
 echo "[$(date)] Starting Zurg + Rclone..." >> "$LOG"
 cd /opt/zurg-testing && docker compose up -d >> "$LOG" 2>&1
 
-# Wait for Zurg to be healthy before starting dependents
+# Wait for Zurg to be healthy
 echo "[$(date)] Waiting for Zurg to be healthy..." >> "$LOG"
 WAIT=0
 while [[ $WAIT -lt 300 ]]; do
@@ -925,11 +926,64 @@ while [[ $WAIT -lt 300 ]]; do
   WAIT=$((WAIT + 10))
 done
 
-# Start *arr stack
+# Wait for Real-Debrid rclone mount to be ready
+echo "[$(date)] Waiting for /mnt/remote/realdebrid mount..." >> "$LOG"
+WAIT=0
+while [[ $WAIT -lt 120 ]]; do
+  if mountpoint -q /mnt/remote/realdebrid 2>/dev/null || ls /mnt/remote/realdebrid &>/dev/null; then
+    echo "[$(date)] /mnt/remote/realdebrid is ready." >> "$LOG"
+    break
+  fi
+  sleep 5
+  WAIT=$((WAIT + 5))
+done
+
+# ── Start NZBDav + Rclone sidecar (Usenet) ───────────────────────────────────
+if [ -f /opt/nzbdav/docker-compose.yml ]; then
+  echo "[$(date)] Starting NZBDav..." >> "$LOG"
+  cd /opt/nzbdav && docker compose up -d nzbdav >> "$LOG" 2>&1
+
+  # Wait for NZBDav to be healthy before starting rclone sidecar
+  echo "[$(date)] Waiting for NZBDav to be healthy..." >> "$LOG"
+  WAIT=0
+  while [[ $WAIT -lt 120 ]]; do
+    if curl -sf "http://localhost:3000/health" &>/dev/null; then
+      echo "[$(date)] NZBDav is healthy." >> "$LOG"
+      break
+    fi
+    sleep 5
+    WAIT=$((WAIT + 5))
+  done
+
+  # Start rclone sidecar (mounts WebDAV to /mnt/remote/nzbdav)
+  echo "[$(date)] Starting NZBDav rclone sidecar..." >> "$LOG"
+  cd /opt/nzbdav && docker compose up -d nzbdav_rclone >> "$LOG" 2>&1
+
+  # Wait for NZBDav rclone mount to be ready before starting arr-stack
+  echo "[$(date)] Waiting for /mnt/remote/nzbdav mount..." >> "$LOG"
+  WAIT=0
+  while [[ $WAIT -lt 120 ]]; do
+    if ls /mnt/remote/nzbdav &>/dev/null; then
+      echo "[$(date)] /mnt/remote/nzbdav is ready." >> "$LOG"
+      break
+    fi
+    sleep 5
+    WAIT=$((WAIT + 5))
+  done
+
+  if ! ls /mnt/remote/nzbdav &>/dev/null; then
+    echo "[$(date)] WARNING: /mnt/remote/nzbdav not ready after 120s - starting arr-stack anyway." >> "$LOG"
+  fi
+else
+  echo "[$(date)] NZBDav not installed, skipping." >> "$LOG"
+fi
+
+# ── Start *arr stack ──────────────────────────────────────────────────────────
+# Starts AFTER all mounts are ready so containers see /mnt/remote/nzbdav correctly
 echo "[$(date)] Starting *arr stack..." >> "$LOG"
 cd /opt/arr-stack && docker compose up -d >> "$LOG" 2>&1
 
-# Start Decypharr
+# ── Start Decypharr ───────────────────────────────────────────────────────────
 echo "[$(date)] Starting Decypharr..." >> "$LOG"
 cd /opt/decypharr && docker compose up -d >> "$LOG" 2>&1
 
