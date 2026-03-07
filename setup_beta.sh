@@ -104,23 +104,23 @@ DECYPHARR_DIR="/opt/decypharr"
 # ── Read instances from JSON ──────────────────────────────────────────────────
 # Returns: name|label|service1,service2,...
 get_instances() {
-  py3 "
-import json
-d = json.load(open('$CONFIG_FILE'))
+  python3 - "$CONFIG_FILE" << 'PYINST'
+import json, sys
+d = json.load(open(sys.argv[1]))
 for i in d.get('instances', []):
     svcs = ','.join(i.get('services', []))
-    print(f&quot;{i['name']}|{i['label']}|{svcs}&quot;)
-"
+    print(f"{i['name']}|{i['label']}|{svcs}")
+PYINST
 }
 
 # Returns global services one per line
 get_global_services() {
-  py3 "
-import json
-d = json.load(open('$CONFIG_FILE'))
+  python3 - "$CONFIG_FILE" << 'PYGLOB'
+import json, sys
+d = json.load(open(sys.argv[1]))
 for s in d.get('global_services', []):
     print(s)
-"
+PYGLOB
 }
 
 has_global_service() {
