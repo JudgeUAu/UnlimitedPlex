@@ -637,25 +637,63 @@ $CheckPrereqsBtn.Add_Click({
     }
 
     # Check WSL2
+    # NOTE: wsl --list output is UTF-16LE with null bytes - must clean before matching
     try {
-        $wslList = & wsl --list --verbose 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            $distro = $WSLDistroBox.Text
-            if ($wslList -match $distro) {
-                $WSLStatus.Text = "[OK] WSL2 ($distro)"
-                $WSLStatus.Foreground = [Windows.Media.Brushes]::LightGreen
-                $WSLVersion.Text = "Distro found: $distro"
-                Write-Log "WSL2: OK - distro '$distro' found" "SUCCESS"
-            } else {
-                $WSLStatus.Text = "[!] WSL2 (no $distro)"
-                $WSLStatus.Foreground = [Windows.Media.SolidColorBrush]([Windows.Media.ColorConverter]::ConvertFromString("#ffcc00"))
-                $WSLVersion.Text = "$distro not found - run: wsl --install"
-                Write-Log "WSL2 found but '$distro' distro not installed. Run: wsl --install" "WARN"
+        $wslFound = $false
+        $distroFound = $false
+        $distro = $WSLDistroBox.Text.Trim()
+
+        # Method 1: wsl -l -q (quiet, one distro per line, cleaner output)
+        $wslQuiet = & wsl -l -q 2>&1
+        if ($LASTEXITCODE -eq 0 -or $wslQuiet) {
+            # Strip null bytes and clean the output
+            $wslClean = ($wslQuiet | ForEach-Object {
+                if ($_ -is [string]) { $_ -replace "`0", "" } else { "$_" -replace "`0", "" }
+            }) -join "`n"
+            $wslFound = $true
+            if ($wslClean -match [regex]::Escape($distro)) {
+                $distroFound = $true
             }
+        }
+
+        # Method 2: fallback - wsl --list --verbose with null-byte stripping
+        if (-not $wslFound) {
+            $wslVerbose = & wsl --list --verbose 2>&1
+            $wslClean = ($wslVerbose | ForEach-Object {
+                if ($_ -is [string]) { $_ -replace "`0", "" } else { "$_" -replace "`0", "" }
+            }) -join "`n"
+            if ($wslClean -match "NAME" -or $wslClean -match $distro) {
+                $wslFound = $true
+                if ($wslClean -match [regex]::Escape($distro)) {
+                    $distroFound = $true
+                }
+            }
+        }
+
+        # Method 3: try running a simple command in the distro directly
+        if (-not $distroFound) {
+            $testRun = & wsl -d $distro -e echo "ok" 2>&1
+            if ($LASTEXITCODE -eq 0 -and "$testRun" -match "ok") {
+                $wslFound = $true
+                $distroFound = $true
+            }
+        }
+
+        if ($distroFound) {
+            $WSLStatus.Text = "[OK] WSL2 ($distro)"
+            $WSLStatus.Foreground = [Windows.Media.Brushes]::LightGreen
+            $WSLVersion.Text = "Distro found: $distro"
+            Write-Log "WSL2: OK - distro '$distro' found" "SUCCESS"
+        } elseif ($wslFound) {
+            $WSLStatus.Text = "[!] WSL2 (no $distro)"
+            $WSLStatus.Foreground = [Windows.Media.SolidColorBrush]([Windows.Media.ColorConverter]::ConvertFromString("#ffcc00"))
+            $WSLVersion.Text = "$distro not found - check distro name above"
+            Write-Log "WSL2 found but '$distro' distro not detected. Check the WSL Distro Name field." "WARN"
+            Write-Log "Run 'wsl -l -q' in PowerShell to see your distro names." "INFO"
         } else {
             $WSLStatus.Text = "[X] WSL2"
             $WSLStatus.Foreground = [Windows.Media.Brushes]::Salmon
-            $WSLVersion.Text = "Not installed"
+            $WSLVersion.Text = "Not installed - run: wsl --install"
             Write-Log "WSL2 not found. Run: wsl --install" "ERROR"
         }
     } catch {
