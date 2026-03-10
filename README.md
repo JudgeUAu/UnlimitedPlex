@@ -1,10 +1,32 @@
-# Unlimated Plex Semi-Automated Setup
+# UnlimitedPlex — Automated Plex + Real-Debrid Setup
 
 > One script to set up a complete Plex media server powered by Real-Debrid, with optional Sonarr/Radarr/Prowlarr and Usenet (NZBDav) integration.
 
 ---
 
-## What's Included
+## 🆕 Beta Version Available
+
+A new **Beta version** is available on the [`beta` branch](https://github.com/JudgeUAu/UnlimitedPlex/tree/beta) with:
+- **Multiple instances** — Main, 4K, Kids, Anime, etc.
+- **Modular service selection** — choose exactly what to install
+- **Global Prowlarr** — single shared indexer for all instances
+- **Updated Windows GUI** — 5-tab WPF installer
+
+**Linux one-liner (beta):**
+```bash
+sudo bash -c "mkdir -p /tmp/unlimitedplex && \
+  curl -fsSL https://raw.githubusercontent.com/JudgeUAu/UnlimitedPlex/beta/setup_beta.sh -o /tmp/unlimitedplex/setup_beta.sh && \
+  curl -fsSL https://raw.githubusercontent.com/JudgeUAu/UnlimitedPlex/beta/setup_beta_tui.sh -o /tmp/unlimitedplex/setup_beta_tui.sh && \
+  chmod +x /tmp/unlimitedplex/*.sh && bash /tmp/unlimitedplex/setup_beta_tui.sh"
+```
+
+**Windows (beta):** Use `windows/Launch-UnlimitedPlex-Beta.bat`
+
+See [README-Beta.md](README-Beta.md) for full beta documentation.
+
+---
+
+## What's Included (Original)
 
 | File | Purpose |
 |------|---------|
