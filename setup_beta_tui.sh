@@ -85,7 +85,7 @@ ZURG_VERSION=$(whiptail --title "Zurg Version" \
 GLOBAL_RESULT=$(whiptail --title "Global Services (optional)" \
   --checklist "\
 These are installed ONCE and shared across all instances.
-Zurg, Decypharr and Plex are always installed automatically." \
+Always installed: Plex, Zurg, Decypharr, Prowlarr." \
   $DLG_H $DLG_W 3 \
   "tautulli" "Tautulli - Plex analytics & monitoring (port 8181)" ON  \
   "pulsarr"  "Pulsarr  - Plex watchlist sync (port 3003)"         OFF \
@@ -141,12 +141,11 @@ add_instance() {
     --checklist "\
 Select which arr services to install for '$LABEL'.
 
-Note: Zurg and Decypharr are global - they handle
-all instances automatically." \
-    $DLG_H $DLG_W 3 \
-    "radarr"   "Radarr   - Movie management"   ON  \
-    "sonarr"   "Sonarr   - TV show management" ON  \
-    "prowlarr" "Prowlarr - Indexer manager"     ON  \
+Note: Zurg, Decypharr and Prowlarr are global.
+Only Radarr and Sonarr are per-instance." \
+    $DLG_H $DLG_W 2 \
+    "radarr" "Radarr - Movie management"   ON  \
+    "sonarr" "Sonarr - TV show management" ON  \
     3>&1 1>&2 2>&3) || return 1
 
   local SVC_LIST=""
@@ -186,7 +185,8 @@ IDX=0
 SUMMARY="Always installed (global):\n"
 SUMMARY+="  - Plex Media Server (port 32400)\n"
 SUMMARY+="  - Zurg + Rclone     (port 9999)\n"
-SUMMARY+="  - Decypharr         (port 8282)\n\n"
+SUMMARY+="  - Decypharr         (port 8282)\n"
+SUMMARY+="  - Prowlarr          (port 9696)\n\n"
 
 SUMMARY+="Optional global services:\n"
 if [[ ${#GLOBAL_SERVICES[@]} -eq 0 ]]; then
@@ -201,16 +201,14 @@ else
   done
 fi
 
-SUMMARY+="\nInstances:\n"
+SUMMARY+="\nInstances (Radarr + Sonarr only):\n"
 for inst in "${INSTANCES[@]}"; do
   IFS='|' read -r INAME ILABEL ISVCS <<< "$inst"
   RADARR_PORT=$((7878 + IDX * 100))
   SONARR_PORT=$((8989 + IDX * 100))
-  PROWLARR_PORT=$((9696 + IDX * 100))
   SUMMARY+="  [$IDX] $ILABEL ($INAME)\n"
-  echo "$ISVCS" | grep -q "radarr"   && SUMMARY+="       Radarr:   port $RADARR_PORT\n"
-  echo "$ISVCS" | grep -q "sonarr"   && SUMMARY+="       Sonarr:   port $SONARR_PORT\n"
-  echo "$ISVCS" | grep -q "prowlarr" && SUMMARY+="       Prowlarr: port $PROWLARR_PORT\n"
+  echo "$ISVCS" | grep -q "radarr" && SUMMARY+="       Radarr: port $RADARR_PORT\n"
+  echo "$ISVCS" | grep -q "sonarr" && SUMMARY+="       Sonarr: port $SONARR_PORT\n"
   SUMMARY+="       Plex libs: /mnt/plex/$ILABEL/{Movies,TV}\n"
   IDX=$((IDX + 1))
 done

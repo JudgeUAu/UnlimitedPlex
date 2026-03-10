@@ -158,8 +158,8 @@ Add-Type -AssemblyName System.Windows.Forms
                         <StackPanel>
                             <TextBlock Style="{StaticResource SectionHeader}" Text="Instances" Margin="0"/>
                             <TextBlock Foreground="#8b949e" FontSize="11" TextWrapping="Wrap">
-                                Each instance gets its own Radarr, Sonarr and/or Prowlarr on separate ports.
-                                Zurg, Decypharr and Plex are always installed globally (once, shared).
+                                Each instance gets its own Radarr and/or Sonarr on separate ports. Prowlarr is global (shared).
+                                Zurg, Decypharr, Prowlarr and Plex are always installed globally (once, shared).
                             </TextBlock>
 
                             <!-- Always-on global services info -->
@@ -175,6 +175,9 @@ Add-Type -AssemblyName System.Windows.Forms
                                         </Border>
                                         <Border Background="#161b22" BorderBrush="#30363d" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,0,8,0">
                                             <TextBlock Text="Decypharr  port:8282" Foreground="#3fb950" FontSize="11"/>
+                                        </Border>
+                                        <Border Background="#161b22" BorderBrush="#30363d" BorderThickness="1" CornerRadius="4" Padding="8,4" Margin="0,0,8,0">
+                                            <TextBlock Text="Prowlarr  port:9696" Foreground="#3fb950" FontSize="11"/>
                                         </Border>
                                     </WrapPanel>
                                 </StackPanel>
@@ -415,6 +418,7 @@ GLOBAL (single instance, always):
   Plex Media Server  - native install, port 32400
   Zurg + Rclone      - /opt/zurg-testing, mounts /mnt/remote/realdebrid
   Decypharr          - /opt/decypharr, knows all arr instances
+  Prowlarr           - /opt/arr-stack, port 9696 (shared indexer)
 
 GLOBAL (optional, single instance):
   Tautulli           - /opt/tautulli, port 8181
@@ -424,7 +428,6 @@ GLOBAL (optional, single instance):
 PER INSTANCE (in /opt/arr-stack, one compose file):
   Radarr             - port 7878, 7978, 8078...
   Sonarr             - port 8989, 9089, 9189...
-  Prowlarr           - port 9696, 9796, 9896...
 
 SYMLINKS (created by Decypharr):
   /mnt/symlinks/main_radarr/
@@ -442,10 +445,12 @@ PLEX LIBRARIES:
                             <StackPanel>
                                 <TextBlock Text="Port Reference" Foreground="#58a6ff" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                 <TextBlock Foreground="#e6edf3" FontSize="12" TextWrapping="Wrap" LineHeight="22">
-Instance 0 (Main):  Radarr:7878  Sonarr:8989  Prowlarr:9696
-Instance 1 (4K):    Radarr:7978  Sonarr:9089  Prowlarr:9796
-Instance 2 (Kids):  Radarr:8078  Sonarr:9189  Prowlarr:9896
-Instance 3:         Radarr:8178  Sonarr:9289  Prowlarr:9996
+Global:             Prowlarr:9696  Decypharr:8282  Zurg:9999
+
+Instance 0 (Main):  Radarr:7878  Sonarr:8989
+Instance 1 (4K):    Radarr:7978  Sonarr:9089
+Instance 2 (Kids):  Radarr:8078  Sonarr:9189
+Instance 3:         Radarr:8178  Sonarr:9289
                                 </TextBlock>
                             </StackPanel>
                         </Border>
@@ -531,11 +536,10 @@ $StatusText         = $Window.FindName("StatusText")
 $Script:Instances     = [System.Collections.Generic.List[hashtable]]::new()
 $Script:StopRequested = $false
 
-# Per-instance services (only these 3 are per-instance)
+# Per-instance services (only Radarr and Sonarr are per-instance)
 $Script:PerInstanceServices = @(
-    @{ Key="radarr";   Label="Radarr";   Desc="Movie management";   BasePort=7878; Default=$true  },
-    @{ Key="sonarr";   Label="Sonarr";   Desc="TV show management"; BasePort=8989; Default=$true  },
-    @{ Key="prowlarr"; Label="Prowlarr"; Desc="Indexer manager";    BasePort=9696; Default=$true  }
+    @{ Key="radarr"; Label="Radarr"; Desc="Movie management";   BasePort=7878; Default=$true },
+    @{ Key="sonarr"; Label="Sonarr"; Desc="TV show management"; BasePort=8989; Default=$true }
 )
 
 # =============================================================================
@@ -816,6 +820,7 @@ function Update-Summary {
     $lines.Add("  Plex Media Server  port:32400")
     $lines.Add("  Zurg + Rclone      port:9999   -> /mnt/remote/realdebrid")
     $lines.Add("  Decypharr          port:8282")
+    $lines.Add("  Prowlarr           port:9696")
     $lines.Add("")
 
     $globalSvcs = @()
@@ -1042,6 +1047,7 @@ $RefreshServicesBtn.Add_Click({
     $allSvcs.Add(@{ Name="Plex";      Container="plexmediaserver"; Port=32400; Path="/web" })
     $allSvcs.Add(@{ Name="Zurg";      Container="zurg";            Port=9999;  Path="" })
     $allSvcs.Add(@{ Name="Decypharr"; Container="decypharr";       Port=8282;  Path="" })
+    $allSvcs.Add(@{ Name="Prowlarr";  Container="prowlarr";        Port=9696;  Path="" })
 
     foreach ($inst in $Script:Instances) {
         foreach ($svcDef in $Script:PerInstanceServices) {

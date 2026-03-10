@@ -137,7 +137,7 @@ instance_has_service() {
 # Base ports - each instance offsets by index * 100
 PORT_RADARR=7878
 PORT_SONARR=8989
-PORT_PROWLARR=9696
+PORT_PROWLARR=9696  # Global single instance
 
 get_port() { echo $(( $1 + $2 * 100 )); }
 
@@ -515,33 +515,30 @@ EOF
     info "  Sonarr [${INST_LABEL}] -> port ${SONARR_PORT}"
   fi
 
-  # PROWLARR
-  if instance_has_service "$INST_SVCS" "prowlarr"; then
-    PROWLARR_PORT=$(get_port $PORT_PROWLARR $INST_IDX)
-    mkdir -p "$ARR_DIR/prowlarr_${INST_NAME}/config"
-    cat >> "$ARR_DIR/docker-compose.yml" << EOF
+  INST_IDX=$((INST_IDX + 1))
+done < <(get_instances)
 
-  prowlarr_${INST_NAME}:
+# PROWLARR - Global single instance (shared by all arr instances)
+mkdir -p "$ARR_DIR/prowlarr/config"
+cat >> "$ARR_DIR/docker-compose.yml" << EOF
+
+  prowlarr:
     image: ghcr.io/hotio/prowlarr:release
-    container_name: prowlarr_${INST_NAME}
+    container_name: prowlarr
     restart: unless-stopped
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
-      - ${ARR_DIR}/prowlarr_${INST_NAME}/config:/config
+      - ${ARR_DIR}/prowlarr/config:/config
       - /mnt:/mnt:rshared
     ports:
-      - "${PROWLARR_PORT}:9696"
+      - "${PORT_PROWLARR}:9696"
     networks:
       - arr-network
 EOF
-    info "  Prowlarr [${INST_LABEL}] -> port ${PROWLARR_PORT}"
-  fi
-
-  INST_IDX=$((INST_IDX + 1))
-done < <(get_instances)
+info "  Prowlarr (global) -> port ${PORT_PROWLARR}"
 
 # Append network section
 cat >> "$ARR_DIR/docker-compose.yml" << EOF
@@ -983,6 +980,7 @@ echo -e "${BOLD}${CYAN}  ── Global Services ──────────�
 echo -e "  ${CYAN}Plex Media Server:${NC}  http://${SERVER_IP}:32400/web"
 echo -e "  ${CYAN}Zurg:${NC}               http://${SERVER_IP}:9999"
 echo -e "  ${CYAN}Decypharr:${NC}          http://${SERVER_IP}:8282"
+echo -e "  ${CYAN}Prowlarr:${NC}           http://${SERVER_IP}:9696"
 has_global_service "tautulli" && echo -e "  ${CYAN}Tautulli:${NC}           http://${SERVER_IP}:8181" || true
 has_global_service "pulsarr"  && echo -e "  ${CYAN}Pulsarr:${NC}            http://${SERVER_IP}:3003" || true
 has_global_service "nzbdav"   && echo -e "  ${CYAN}NZBDav:${NC}             http://${SERVER_IP}:3000" || true
@@ -992,9 +990,8 @@ INST_IDX=0
 while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
   [[ -z "$INST_NAME" ]] && continue
   echo -e "${BOLD}${CYAN}  ── Instance: ${INST_LABEL} ──────────────────────────────────────────────────${NC}"
-  instance_has_service "$INST_SVCS" "radarr"   && echo -e "  ${CYAN}Radarr   [${INST_LABEL}]:${NC}  http://${SERVER_IP}:$(get_port $PORT_RADARR $INST_IDX)" || true
-  instance_has_service "$INST_SVCS" "sonarr"   && echo -e "  ${CYAN}Sonarr   [${INST_LABEL}]:${NC}  http://${SERVER_IP}:$(get_port $PORT_SONARR $INST_IDX)" || true
-  instance_has_service "$INST_SVCS" "prowlarr" && echo -e "  ${CYAN}Prowlarr [${INST_LABEL}]:${NC}  http://${SERVER_IP}:$(get_port $PORT_PROWLARR $INST_IDX)" || true
+  instance_has_service "$INST_SVCS" "radarr" && echo -e "  ${CYAN}Radarr [${INST_LABEL}]:${NC}  http://${SERVER_IP}:$(get_port $PORT_RADARR $INST_IDX)" || true
+  instance_has_service "$INST_SVCS" "sonarr" && echo -e "  ${CYAN}Sonarr [${INST_LABEL}]:${NC}  http://${SERVER_IP}:$(get_port $PORT_SONARR $INST_IDX)" || true
   echo -e "  ${YELLOW}Plex libs:${NC} /mnt/plex/${INST_LABEL}/{Movies,TV}"
   echo -e "  ${YELLOW}Symlinks:${NC}  /mnt/symlinks/${INST_NAME}_{radarr,sonarr}"
   echo ""
@@ -1019,6 +1016,7 @@ LINKS_FILE="/root/unlimitedplex_links.txt"
   echo "  Plex:       http://${SERVER_IP}:32400/web"
   echo "  Zurg:       http://${SERVER_IP}:9999"
   echo "  Decypharr:  http://${SERVER_IP}:8282"
+  echo "  Prowlarr:   http://${SERVER_IP}:9696"
   has_global_service "tautulli" && echo "  Tautulli:   http://${SERVER_IP}:8181" || true
   has_global_service "pulsarr"  && echo "  Pulsarr:    http://${SERVER_IP}:3003" || true
   has_global_service "nzbdav"   && echo "  NZBDav:     http://${SERVER_IP}:3000" || true
@@ -1027,9 +1025,8 @@ LINKS_FILE="/root/unlimitedplex_links.txt"
   while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do
     [[ -z "$INST_NAME" ]] && continue
     echo "Instance: ${INST_LABEL}"
-    instance_has_service "$INST_SVCS" "radarr"   && echo "  Radarr:    http://${SERVER_IP}:$(get_port $PORT_RADARR $INST_IDX)" || true
-    instance_has_service "$INST_SVCS" "sonarr"   && echo "  Sonarr:    http://${SERVER_IP}:$(get_port $PORT_SONARR $INST_IDX)" || true
-    instance_has_service "$INST_SVCS" "prowlarr" && echo "  Prowlarr:  http://${SERVER_IP}:$(get_port $PORT_PROWLARR $INST_IDX)" || true
+    instance_has_service "$INST_SVCS" "radarr" && echo "  Radarr:  http://${SERVER_IP}:$(get_port $PORT_RADARR $INST_IDX)" || true
+    instance_has_service "$INST_SVCS" "sonarr" && echo "  Sonarr:  http://${SERVER_IP}:$(get_port $PORT_SONARR $INST_IDX)" || true
     echo ""
     INST_IDX=$((INST_IDX + 1))
   done < <(get_instances)
