@@ -4,6 +4,25 @@
 
 ---
 
+## 🆕 Beta Version Available
+
+A **Beta installer** is now available with multiple instance support and modular service selection.
+
+| | Original | Beta |
+|--|---------|------|
+| **Launcher** | `Launch-UnlimitedPlex.bat` | `Launch-UnlimitedPlex-Beta.bat` |
+| **Script** | `UnlimitedPlex.ps1` | `UnlimitedPlex-Beta.ps1` |
+| **Multiple instances** | ❌ | ✅ Main, 4K, Kids, etc. |
+| **Service selection** | Fixed | Choose Radarr/Sonarr per instance |
+| **Global Prowlarr** | ✅ | ✅ Single shared indexer |
+| **Optional globals** | ❌ | ✅ Tautulli, Pulsarr, NZBDav |
+
+**To use the Beta:** Right-click `Launch-UnlimitedPlex-Beta.bat` → **Run as Administrator**
+
+See [README-Beta.md](../README-Beta.md) for full beta documentation.
+
+---
+
 ## Requirements
 
 | Requirement | Details |
