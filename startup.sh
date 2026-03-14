@@ -28,10 +28,21 @@ mount --make-shared /mnt 2>/dev/null || true
 echo "[$(date)] /mnt set as shared mount." >> "$LOG"
 
 # ── Zurg + Rclone (Real-Debrid) ───────────────────────────────────────────────
+# Kill any lingering rclone processes mounting realdebrid
+pkill -f "rclone mount zurg" 2>/dev/null || true
+sleep 2
 # Unmount ALL stale realdebrid mounts (can pile up after crashes/restarts)
-for i in $(seq 1 20); do
-  fusermount -uz /mnt/remote/realdebrid 2>/dev/null || umount -f /mnt/remote/realdebrid 2>/dev/null || break
+for i in $(seq 1 30); do
+  fusermount -uz /mnt/remote/realdebrid 2>/dev/null && continue
+  umount -f /mnt/remote/realdebrid 2>/dev/null && continue
+  break
 done
+# Verify clean
+if mount | grep -q "/mnt/remote/realdebrid"; then
+  echo "[$(date)] WARNING: realdebrid mount still present, forcing lazy unmount..." >> "$LOG"
+  umount -l /mnt/remote/realdebrid 2>/dev/null || true
+  sleep 3
+fi
 echo "[$(date)] Starting Zurg + Rclone..." >> "$LOG"
 cd /opt/zurg-testing && docker compose up -d >> "$LOG" 2>&1
 
@@ -57,10 +68,21 @@ while [[ $WAIT -lt 120 ]]; do
 done
 
 # ── NZBDav + Rclone sidecar (Usenet) ─────────────────────────────────────────
+# Kill any lingering rclone processes mounting nzbdav
+pkill -f "rclone mount nzbdav" 2>/dev/null || true
+sleep 2
 # Unmount ALL stale nzbdav mounts (can pile up after crashes/restarts)
-for i in $(seq 1 20); do
-  fusermount -uz /mnt/remote/nzbdav 2>/dev/null || umount -f /mnt/remote/nzbdav 2>/dev/null || break
+for i in $(seq 1 30); do
+  fusermount -uz /mnt/remote/nzbdav 2>/dev/null && continue
+  umount -f /mnt/remote/nzbdav 2>/dev/null && continue
+  break
 done
+# Verify clean
+if mount | grep -q "/mnt/remote/nzbdav"; then
+  echo "[$(date)] WARNING: nzbdav mount still present, forcing lazy unmount..." >> "$LOG"
+  umount -l /mnt/remote/nzbdav 2>/dev/null || true
+  sleep 3
+fi
 echo "[$(date)] Starting NZBDav..." >> "$LOG"
 cd /opt/nzbdav && docker compose up -d nzbdav >> "$LOG" 2>&1
 

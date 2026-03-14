@@ -808,7 +808,6 @@ services:
     command: >
       mount nzbdav: /mnt/remote/nzbdav
         --allow-other
-        --allow-non-empty
         --links
         --use-cookies
         --vfs-cache-mode=off
