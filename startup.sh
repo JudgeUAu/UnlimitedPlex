@@ -1,8 +1,6 @@
 #!/bin/bash
 # startup.sh – Full service startup for UnlimitedPlex
 # Launched at boot via cron (@reboot)
-# Services: Zurg, NZBDav, arr-stack, Decypharr, Overseerr,
-#           Prowlarr, Pulsarr, Audiobookshelf, Bookshelf, Flaresolverr
 
 LOG="/var/log/startup_arr_stack.log"
 echo "[$(date)] ============================================" >> "$LOG"
@@ -32,9 +30,8 @@ echo "[$(date)] /mnt set as shared mount." >> "$LOG"
 # ── Zurg + Rclone (Real-Debrid) ───────────────────────────────────────────────
 # Unmount ALL stale realdebrid mounts (can pile up after crashes/restarts)
 for i in $(seq 1 20); do
-  fusermount -uz /mnt/remote/realdebrid 2>/dev/null || umount -l /mnt/remote/realdebrid 2>/dev/null || break
+  fusermount -uz /mnt/remote/realdebrid 2>/dev/null || umount -f /mnt/remote/realdebrid 2>/dev/null || break
 done
-
 echo "[$(date)] Starting Zurg + Rclone..." >> "$LOG"
 cd /opt/zurg-testing && docker compose up -d >> "$LOG" 2>&1
 
@@ -62,9 +59,8 @@ done
 # ── NZBDav + Rclone sidecar (Usenet) ─────────────────────────────────────────
 # Unmount ALL stale nzbdav mounts (can pile up after crashes/restarts)
 for i in $(seq 1 20); do
-  fusermount -uz /mnt/remote/nzbdav 2>/dev/null || umount -l /mnt/remote/nzbdav 2>/dev/null || break
+  fusermount -uz /mnt/remote/nzbdav 2>/dev/null || umount -f /mnt/remote/nzbdav 2>/dev/null || break
 done
-
 echo "[$(date)] Starting NZBDav..." >> "$LOG"
 cd /opt/nzbdav && docker compose up -d nzbdav >> "$LOG" 2>&1
 
@@ -91,46 +87,21 @@ while [[ $WAIT -lt 120 ]]; do
   sleep 5; WAIT=$((WAIT + 5))
 done
 
-# ── arr-stack (Radarr, Radarr4K, Sonarr, Sonarr4K, SonarrKids) ───────────────
+# ── arr-stack (Radarr, Radarr4K, Sonarr, Sonarr4K, SonarrKids,
+#               Prowlarr, Overseerr, Pulsarr, Audiobookshelf, Bookshelf) ──────
 echo "[$(date)] Starting arr-stack..." >> "$LOG"
 cd /opt/arr-stack && docker compose up -d >> "$LOG" 2>&1
 echo "[$(date)] arr-stack started." >> "$LOG"
 
-# ── Prowlarr ──────────────────────────────────────────────────────────────────
-echo "[$(date)] Starting Prowlarr..." >> "$LOG"
-cd /opt/prowlarr && docker compose up -d >> "$LOG" 2>&1
-echo "[$(date)] Prowlarr started." >> "$LOG"
-
-# ── Decypharr ─────────────────────────────────────────────────────────────────
+# ── Decypharr (has its own compose file) ─────────────────────────────────────
 echo "[$(date)] Starting Decypharr..." >> "$LOG"
 cd /opt/decypharr && docker compose up -d >> "$LOG" 2>&1
 echo "[$(date)] Decypharr started." >> "$LOG"
 
-# ── Overseerr ─────────────────────────────────────────────────────────────────
-echo "[$(date)] Starting Overseerr..." >> "$LOG"
-cd /opt/overseerr && docker compose up -d >> "$LOG" 2>&1
-echo "[$(date)] Overseerr started." >> "$LOG"
-
-# ── Pulsarr ───────────────────────────────────────────────────────────────────
-echo "[$(date)] Starting Pulsarr..." >> "$LOG"
-cd /opt/pulsarr && docker compose up -d >> "$LOG" 2>&1
-echo "[$(date)] Pulsarr started." >> "$LOG"
-
-# ── Flaresolverr ──────────────────────────────────────────────────────────────
+# ── Flaresolverr (has its own compose file) ───────────────────────────────────
 echo "[$(date)] Starting Flaresolverr..." >> "$LOG"
 cd /opt/flaresolverr && docker compose up -d >> "$LOG" 2>&1
 echo "[$(date)] Flaresolverr started." >> "$LOG"
-
-# ── Audiobookshelf ────────────────────────────────────────────────────────────
-echo "[$(date)] Starting Audiobookshelf..." >> "$LOG"
-cd /opt/audiobookshelf && docker compose up -d >> "$LOG" 2>&1
-echo "[$(date)] Audiobookshelf started." >> "$LOG"
-
-# ── Bookshelf (Audiobooks + Ebooks) ──────────────────────────────────────────
-echo "[$(date)] Starting Bookshelf..." >> "$LOG"
-cd /opt/bookshelf-audiobooks && docker compose up -d >> "$LOG" 2>&1
-cd /opt/bookshelf-ebooks && docker compose up -d >> "$LOG" 2>&1
-echo "[$(date)] Bookshelf started." >> "$LOG"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo "[$(date)] ============================================" >> "$LOG"
