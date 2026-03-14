@@ -25,7 +25,8 @@ if ! mountpoint -q /mnt 2>/dev/null; then
   mount --bind /mnt /mnt 2>/dev/null || true
 fi
 mount --make-shared /mnt 2>/dev/null || true
-echo "[$(date)] /mnt set as shared mount." >> "$LOG"
+mount --make-rshared /mnt 2>/dev/null || true
+echo "[$(date)] /mnt set as shared+rshared mount." >> "$LOG"
 
 # ── Zurg + Rclone (Real-Debrid) ───────────────────────────────────────────────
 # Kill any lingering rclone processes mounting realdebrid
