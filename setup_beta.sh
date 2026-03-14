@@ -769,11 +769,12 @@ RCLONE_CONF
   cat > "$NZBDAV_DIR/docker-compose.yml" << NZBDAV_COMPOSE
 services:
   nzbdav:
-    image: nzbdav/nzbdav:0.5.34
+    image: nzbdav/nzbdav:latest
     container_name: nzbdav
     restart: unless-stopped
     environment:
       - TZ=${TZ}
+      - UPGRADE=0.6.0
     volumes:
       - ${NZBDAV_DIR}/config:/config
       - /mnt:/mnt
