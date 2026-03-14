@@ -89,7 +89,7 @@ while mount | grep -q "/mnt/remote/nzbdav" && [[ $UMOUNT_TRIES -lt 5 ]]; do
   sleep 2
   UMOUNT_TRIES=$((UMOUNT_TRIES + 1))
 done
-echo "[$(date)] nzbdav mount cleanup done." >> "$LOG"
+echo "[$(date)] nzbdav mount cleanup done (ghost mounts may persist in WSL2 - this is OK)." >> "$LOG"
 echo "[$(date)] Starting NZBDav..." >> "$LOG"
 cd /opt/nzbdav && docker compose up -d nzbdav >> "$LOG" 2>&1
 
