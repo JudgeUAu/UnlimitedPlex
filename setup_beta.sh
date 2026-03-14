@@ -753,18 +753,30 @@ if has_global_service "nzbdav"; then
   mkdir -p "$NZBDAV_DIR/config"
   mkdir -p /mnt/remote/nzbdav
 
+  # Generate obscured password for rclone
+  NZBDAV_PASS_OBSCURED=$(docker run --rm rclone/rclone:latest obscure "${NZBDAV_PASSWORD}" 2>/dev/null || echo "${NZBDAV_PASSWORD}")
+
+  # Write rclone.conf for NZBDav
+  cat > "$NZBDAV_DIR/rclone.conf" << RCLONE_CONF
+[nzbdav]
+type = webdav
+url = http://nzbdav:3000/
+vendor = other
+user = nzbdav
+pass = ${NZBDAV_PASS_OBSCURED}
+RCLONE_CONF
+
   cat > "$NZBDAV_DIR/docker-compose.yml" << NZBDAV_COMPOSE
 services:
   nzbdav:
-    image: nzbdav/nzbdav:alpha
+    image: nzbdav/nzbdav:0.5.34
     container_name: nzbdav
     restart: unless-stopped
     environment:
       - TZ=${TZ}
-      - PUID=${PUID}
-      - PGID=${PGID}
     volumes:
       - ${NZBDAV_DIR}/config:/config
+      - /mnt:/mnt
     ports:
       - "3000:3000"
     networks:
@@ -783,22 +795,27 @@ services:
     depends_on:
       nzbdav:
         condition: service_healthy
+        restart: true
     cap_add:
       - SYS_ADMIN
     security_opt:
       - apparmor:unconfined
     devices:
-      - /dev/fuse:/dev/fuse
+      - /dev/fuse:/dev/fuse:rwm
     volumes:
       - /mnt:/mnt:rshared
+      - ${NZBDAV_DIR}/rclone.conf:/config/rclone/rclone.conf
     command:
       - mount
-      - ":webdav,url=http://nzbdav:3000/dav/,user=nzbdav,pass=${NZBDAV_PASSWORD}"
+      - nzbdav:
       - /mnt/remote/nzbdav
       - --allow-other
+      - --allow-non-empty
+      - --links
+      - --use-cookies
       - --vfs-cache-mode=off
       - --buffer-size=32M
-      - --no-checksum
+      - --dir-cache-time=20s
       - --log-level=INFO
     networks:
       - arr-network
