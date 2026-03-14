@@ -805,18 +805,16 @@ services:
     volumes:
       - /mnt:/mnt:rshared
       - ${NZBDAV_DIR}/rclone.conf:/config/rclone/rclone.conf
-    command:
-      - mount
-      - nzbdav:
-      - /mnt/remote/nzbdav
-      - --allow-other
-      - --allow-non-empty
-      - --links
-      - --use-cookies
-      - --vfs-cache-mode=off
-      - --buffer-size=32M
-      - --dir-cache-time=20s
-      - --log-level=INFO
+    command: >
+      mount nzbdav: /mnt/remote/nzbdav
+        --allow-other
+        --allow-non-empty
+        --links
+        --use-cookies
+        --vfs-cache-mode=off
+        --buffer-size=32M
+        --dir-cache-time=20s
+        --log-level=INFO
     networks:
       - arr-network
 
