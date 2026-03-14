@@ -38,12 +38,12 @@ for i in $(seq 1 30); do
   umount -f /mnt/remote/realdebrid 2>/dev/null && continue
   break
 done
-# Verify clean
-if mount | grep -q "/mnt/remote/realdebrid"; then
+# Verify clean - use lazy unmount as final fallback
+while mount | grep -q "/mnt/remote/realdebrid"; do
   echo "[$(date)] WARNING: realdebrid mount still present, forcing lazy unmount..." >> "$LOG"
   umount -l /mnt/remote/realdebrid 2>/dev/null || true
-  sleep 3
-fi
+  sleep 2
+done
 echo "[$(date)] Starting Zurg + Rclone..." >> "$LOG"
 cd /opt/zurg-testing && docker compose up -d >> "$LOG" 2>&1
 
@@ -78,12 +78,12 @@ for i in $(seq 1 30); do
   umount -f /mnt/remote/nzbdav 2>/dev/null && continue
   break
 done
-# Verify clean
-if mount | grep -q "/mnt/remote/nzbdav"; then
+# Verify clean - use lazy unmount as final fallback
+while mount | grep -q "/mnt/remote/nzbdav"; do
   echo "[$(date)] WARNING: nzbdav mount still present, forcing lazy unmount..." >> "$LOG"
   umount -l /mnt/remote/nzbdav 2>/dev/null || true
-  sleep 3
-fi
+  sleep 2
+done
 echo "[$(date)] Starting NZBDav..." >> "$LOG"
 cd /opt/nzbdav && docker compose up -d nzbdav >> "$LOG" 2>&1
 
