@@ -31,8 +31,9 @@
 #      { "name": "4k",    "label": "4K",    "services": ["radarr","sonarr"] },
 #      { "name": "kids",  "label": "Kids",  "services": ["radarr","sonarr"] }
 #    ],
-#    "global_services": ["tautulli","nzbdav","pulsarr"],
-#    "nzbdav_password": "changeme"
+#    "global_services": ["tautulli","nzbdav","pulsarr","radarr4k-cleanup"],
+#    "nzbdav_password": "changeme",
+#    "tmdb_api_key": ""
 #  }
 #
 #  USAGE:
@@ -87,6 +88,7 @@ PLEX_TOKEN=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('p
 TZ=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('timezone','America/New_York'))")
 ZURG_VERSION=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('zurg_version','v0.9.3-final'))")
 NZBDAV_PASSWORD=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('nzbdav_password','changeme'))")
+TMDB_API_KEY=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get('tmdb_api_key',''))")
 
 [[ -z "$RD_TOKEN" ]]   && error "rd_token is required in config"
 [[ -z "$PLEX_TOKEN" ]] && error "plex_token is required in config"
@@ -844,7 +846,60 @@ NZBDAV_COMPOSE
 fi
 
 # =============================================================================
-# STEP 12 - GENERATE STARTUP SCRIPT (same structure as original)
+# STEP 12 - RADARR 4K CLEANUP UI (global, optional)
+# =============================================================================
+if has_global_service "radarr4k-cleanup"; then
+  section "Step 12 - Deploy Radarr 4K Cleanup UI"
+  CLEANUP_DIR="/opt/radarr4k-cleanup"
+  mkdir -p "$CLEANUP_DIR/templates"
+
+  # Pull app.py and index.html from the repo
+  info "Downloading Radarr 4K Cleanup files..."
+  curl -fsSL "https://raw.githubusercontent.com/JudgeUAu/UnlimitedPlex/beta/radarr4k-cleanup/app.py" \
+    -o "$CLEANUP_DIR/app.py"
+  curl -fsSL "https://raw.githubusercontent.com/JudgeUAu/UnlimitedPlex/beta/radarr4k-cleanup/templates/index.html" \
+    -o "$CLEANUP_DIR/templates/index.html"
+  curl -fsSL "https://raw.githubusercontent.com/JudgeUAu/UnlimitedPlex/beta/radarr4k-cleanup/Dockerfile" \
+    -o "$CLEANUP_DIR/Dockerfile"
+
+  # Auto-read Radarr 4K API key from config.xml
+  RADARR4K_KEY=""
+  if [ -f "/opt/radarr4k/config.xml" ]; then
+    RADARR4K_KEY=$(grep -oP '(?<=<ApiKey>)[^<]+' "/opt/radarr4k/config.xml" 2>/dev/null || true)
+  fi
+
+  cat > "$CLEANUP_DIR/docker-compose.yml" << CLEANUP_COMPOSE
+services:
+  radarr4k-cleanup:
+    build: ${CLEANUP_DIR}
+    container_name: radarr4k-cleanup
+    restart: unless-stopped
+    ports:
+      - "7500:7500"
+    environment:
+      - TZ=${TZ}
+      - RADARR_HOST=http://radarr4k:7878
+      - RADARR_API_KEY=${RADARR4K_KEY}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+    volumes:
+      - /opt/radarr4k:/config:ro
+    networks:
+      - arr-network
+
+networks:
+  arr-network:
+    name: ${DOCKER_NETWORK}
+    external: true
+CLEANUP_COMPOSE
+
+  info "Building Radarr 4K Cleanup image (this may take a minute)..."
+  (cd "$CLEANUP_DIR" && docker compose build) 2>&1 | tail -5
+  (cd "$CLEANUP_DIR" && docker compose up -d) 2>&1 | tail -3
+  success "Radarr 4K Cleanup UI deployed on port 7500."
+fi
+
+# =============================================================================
+# STEP 13 - GENERATE STARTUP SCRIPT (same structure as original)
 # =============================================================================
 section "Step 12 - Generate Startup Script"
 
@@ -1000,6 +1055,7 @@ echo -e "  ${CYAN}Prowlarr:${NC}           http://${SERVER_IP}:9696"
 has_global_service "tautulli" && echo -e "  ${CYAN}Tautulli:${NC}           http://${SERVER_IP}:8181" || true
 has_global_service "pulsarr"  && echo -e "  ${CYAN}Pulsarr:${NC}            http://${SERVER_IP}:3003" || true
 has_global_service "nzbdav"   && echo -e "  ${CYAN}NZBDav:${NC}             http://${SERVER_IP}:3000" || true
+has_global_service "radarr4k-cleanup" && echo -e "  ${CYAN}Radarr 4K Cleanup:${NC}  http://${SERVER_IP}:7500" || true
 echo ""
 
 INST_IDX=0
@@ -1036,6 +1092,7 @@ LINKS_FILE="/root/unlimitedplex_links.txt"
   has_global_service "tautulli" && echo "  Tautulli:   http://${SERVER_IP}:8181" || true
   has_global_service "pulsarr"  && echo "  Pulsarr:    http://${SERVER_IP}:3003" || true
   has_global_service "nzbdav"   && echo "  NZBDav:     http://${SERVER_IP}:3000" || true
+  has_global_service "radarr4k-cleanup" && echo "  Radarr 4K Cleanup: http://${SERVER_IP}:7500" || true
   echo ""
   INST_IDX=0
   while IFS='|' read -r INST_NAME INST_LABEL INST_SVCS; do

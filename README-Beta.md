@@ -41,6 +41,7 @@
 | Tautulli | 8181 | /opt/tautulli | Optional |
 | Pulsarr | 3003 | /opt/pulsarr | Optional |
 | NZBDav | 3000 | /opt/nzbdav | Optional — Usenet streaming |
+| Radarr 4K Cleanup | 7500 | /opt/radarr4k-cleanup | Optional — Remove non-4K movies |
 
 ### Per-Instance Services (one set per instance, e.g. Main, 4K, Kids)
 
@@ -66,6 +67,7 @@
 /opt/tautulli/              Tautulli (optional global)
 /opt/pulsarr/               Pulsarr (optional global)
 /opt/nzbdav/                NZBDav + Rclone sidecar (optional global)
+/opt/radarr4k-cleanup/      Radarr 4K Cleanup UI (optional global)
 
 /mnt/remote/realdebrid/     Zurg rclone mount
 /mnt/remote/nzbdav/         NZBDav rclone mount (if enabled)
@@ -194,7 +196,8 @@ The TUI and Windows GUI generate this automatically. You can also write it manua
     { "name": "4k",    "label": "4K",    "services": ["radarr", "sonarr"] },
     { "name": "kids",  "label": "Kids",  "services": ["radarr"] }
   ],
-  "global_services": ["tautulli", "pulsarr", "nzbdav"]
+  "global_services": ["tautulli", "pulsarr", "nzbdav", "radarr4k-cleanup"],
+  "tmdb_api_key": "your_tmdb_key_here"
 }
 ```
 
@@ -202,7 +205,8 @@ The TUI and Windows GUI generate this automatically. You can also write it manua
 - `name` — lowercase, no spaces (used in container names and symlink paths)
 - `label` — display name (used in Plex library paths)
 - `services` — array of `"radarr"` and/or `"sonarr"` (Prowlarr is always global)
-- `global_services` — any combination of `"tautulli"`, `"pulsarr"`, `"nzbdav"`
+- `global_services` — any combination of `"tautulli"`, `"pulsarr"`, `"nzbdav"`, `"radarr4k-cleanup"`
+- `tmdb_api_key` — *(optional, for radarr4k-cleanup)* free key from https://www.themoviedb.org/settings/api
 
 ---
 
@@ -251,7 +255,18 @@ For each instance:
 1. Connect to Plex Media Server
 2. Configure notifications as desired
 
-### 6. NZBDav (http://YOUR_IP:3000) — Optional global
+### 6. Radarr 4K Cleanup (http://YOUR_IP:7500) — Optional global
+
+A web UI that scans your Radarr 4K library and removes movies that are known to have no 4K release, then blocklists them so they can't be re-added.
+
+- **Scan** — checks every movie via TMDB data (budget, popularity, release year, streaming providers)
+- **Review** — tabbed results: 🗑 Delete / ❓ Uncertain / ✅ Keep
+- **Delete & Blocklist** — one click to remove confirmed non-4K movies with `addImportExclusion=true`
+- **TMDB key** — optional but recommended for accuracy (free at https://www.themoviedb.org/settings/api)
+
+To enable, add `"radarr4k-cleanup"` to your `global_services` in the config JSON and optionally set `"tmdb_api_key"`.
+
+### 7. NZBDav (http://YOUR_IP:3000) — Optional global
 
 1. Create admin account on first launch
 2. Settings → Usenet: configure your Usenet provider

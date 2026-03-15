@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Radarr 4K Cleanup</title>
+  <style>
+    :root {
+      --bg:        #1a1d23;
+      --bg2:       #23272e;
+      --bg3:       #2b2f38;
+      --border:    #383d48;
+      --accent:    #f5c518;
+      --accent2:   #e67e22;
+      --text:      #d4d8e0;
+      --text2:     #9098a8;
+      --green:     #2ecc71;
+      --red:       #e74c3c;
+      --orange:    #f39c12;
+      --blue:      #3498db;
+      --radius:    8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--bg2);
+      border-bottom: 2px solid var(--accent);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 60px;
+    }
+    header .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.5px;
+    }
+    header .logo span { color: var(--text2); font-weight: 400; }
+    .status-pill {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text2);
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--text2);
+    }
+    .dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.red    { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+    .dot.orange { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+    .dot.pulse  { animation: pulse 1s infinite; }
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+
+    /* ── Layout ── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .card-header {
+      background: var(--bg3);
+      padding: 12px 16px;
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-body { padding: 16px; }
+
+    /* ── Connection status ── */
+    .conn-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .conn-row:last-child { border-bottom: none; }
+    .conn-label { color: var(--text2); font-size: 13px; }
+    .conn-val   { font-size: 13px; font-weight: 500; }
+    .ok   { color: var(--green); }
+    .fail { color: var(--red); }
+    .warn { color: var(--orange); }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-decoration: none;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary  { background: var(--accent); color: #111; }
+    .btn-primary:hover:not(:disabled)  { background: #ffd700; transform: translateY(-1px); }
+    .btn-danger   { background: var(--red); color: #fff; }
+    .btn-danger:hover:not(:disabled)   { background: #c0392b; transform: translateY(-1px); }
+    .btn-success  { background: var(--green); color: #111; }
+    .btn-success:hover:not(:disabled)  { background: #27ae60; transform: translateY(-1px); }
+    .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover:not(:disabled){ background: var(--border); }
+
+    /* ── Progress ── */
+    .progress-wrap {
+      background: var(--bg3);
+      border-radius: 4px;
+      height: 8px;
+      margin: 12px 0;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text2);
+      margin-bottom: 4px;
+    }
+
+    /* ── Stats row ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .stat {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      text-align: center;
+    }
+    .stat-num  { font-size: 28px; font-weight: 700; line-height: 1; }
+    .stat-lbl  { font-size: 11px; color: var(--text2); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat.green .stat-num { color: var(--green); }
+    .stat.red   .stat-num { color: var(--red); }
+    .stat.orange .stat-num { color: var(--orange); }
+    .stat.blue  .stat-num { color: var(--blue); }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .tab {
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text2);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-badge {
+      display: inline-block;
+      background: var(--bg3);
+      border-radius: 10px;
+      padding: 1px 6px;
+      font-size: 11px;
+      margin-left: 4px;
+    }
+    .tab.active .tab-badge { background: var(--accent); color: #111; }
+
+    /* ── Movie list ── */
+    .movie-list { max-height: 450px; overflow-y: auto; }
+    .movie-list::-webkit-scrollbar { width: 6px; }
+    .movie-list::-webkit-scrollbar-track { background: var(--bg3); }
+    .movie-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .movie-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .movie-item:last-child { border-bottom: none; }
+    .movie-icon { font-size: 18px; flex-shrink: 0; margin-top: 2px; }
+    .movie-info { flex: 1; min-width: 0; }
+    .movie-title {
+      font-weight: 600;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .movie-meta {
+      font-size: 12px;
+      color: var(--text2);
+      margin-top: 2px;
+    }
+    .movie-reason {
+      font-size: 11px;
+      color: var(--text2);
+      margin-top: 3px;
+      font-style: italic;
+    }
+    .movie-year {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .tmdb-link {
+      font-size: 11px;
+      color: var(--blue);
+      text-decoration: none;
+    }
+    .tmdb-link:hover { text-decoration: underline; }
+
+    /* ── Log ── */
+    .log-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      padding: 12px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .log-box::-webkit-scrollbar { width: 6px; }
+    .log-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .log-entry { padding: 1px 0; }
+    .log-time   { color: var(--text2); margin-right: 8px; }
+    .log-info   { color: var(--text); }
+    .log-success{ color: var(--green); }
+    .log-warning{ color: var(--orange); }
+    .log-danger { color: var(--red); }
+
+    /* ── Delete options ── */
+    .delete-options {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-top: 12px;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      padding: 6px 0;
+    }
+    .checkbox-row input[type=checkbox] {
+      width: 16px; height: 16px;
+      accent-color: var(--red);
+      cursor: pointer;
+    }
+    .checkbox-label { font-size: 13px; color: var(--text); }
+    .checkbox-desc  { font-size: 11px; color: var(--text2); margin-left: 26px; }
+
+    /* ── Phase banners ── */
+    .phase-banner {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+    .phase-banner.scanning { background: rgba(52,152,219,0.15); border: 1px solid rgba(52,152,219,0.3); color: var(--blue); }
+    .phase-banner.done     { background: rgba(46,204,113,0.15); border: 1px solid rgba(46,204,113,0.3); color: var(--green); }
+    .phase-banner.deleting { background: rgba(231,76,60,0.15);  border: 1px solid rgba(231,76,60,0.3);  color: var(--red); }
+    .phase-banner.warn     { background: rgba(243,156,18,0.15); border: 1px solid rgba(243,156,18,0.3); color: var(--orange); }
+    .spin { animation: spin 1s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Empty state ── */
+    .empty {
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--text2);
+    }
+    .empty-icon { font-size: 40px; margin-bottom: 8px; }
+
+    /* ── Hidden ── */
+    .hidden { display: none !important; }
+  </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="logo">🎬 Radarr 4K <span>Cleanup</span></div>
+  <div class="status-pill">
+    <div class="dot" id="connDot"></div>
+    <span id="connText">Checking...</span>
+  </div>
+</header>
+
+<div class="container">
+  <div class="grid">
+
+    <!-- ── Left column ── -->
+    <div>
+
+      <!-- Phase banner -->
+      <div id="phaseBanner" class="hidden"></div>
+
+      <!-- Stats -->
+      <div class="stats" id="statsRow" style="display:none">
+        <div class="stat green">
+          <div class="stat-num" id="statKeep">0</div>
+          <div class="stat-lbl">✅ Keep</div>
+        </div>
+        <div class="stat red">
+          <div class="stat-num" id="statDelete">0</div>
+          <div class="stat-lbl">🗑 Delete</div>
+        </div>
+        <div class="stat orange">
+          <div class="stat-num" id="statUncertain">0</div>
+          <div class="stat-lbl">❓ Uncertain</div>
+        </div>
+        <div class="stat blue">
+          <div class="stat-num" id="statSkip">0</div>
+          <div class="stat-lbl">⏭ Skipped</div>
+        </div>
+      </div>
+
+      <!-- Progress bar (visible while scanning) -->
+      <div id="progressWrap" class="hidden">
+        <div class="progress-label">
+          <span id="progressText">Scanning...</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-bar" id="progressBar" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Results tabs -->
+      <div id="resultsSection" class="hidden card">
+        <div class="card-header">📋 Scan Results</div>
+        <div class="card-body">
+          <div class="tabs">
+            <div class="tab active" data-tab="delete" onclick="switchTab('delete')">
+              🗑 No 4K Release <span class="tab-badge" id="tabBadgeDelete">0</span>
+            </div>
+            <div class="tab" data-tab="uncertain" onclick="switchTab('uncertain')">
+              ❓ Uncertain <span class="tab-badge" id="tabBadgeUncertain">0</span>
+            </div>
+            <div class="tab" data-tab="keep" onclick="switchTab('keep')">
+              ✅ Keep <span class="tab-badge" id="tabBadgeKeep">0</span>
+            </div>
+            <div class="tab" data-tab="skip" onclick="switchTab('skip')">
+              ⏭ Skipped <span class="tab-badge" id="tabBadgeSkip">0</span>
+            </div>
+          </div>
+
+          <div id="tabDelete" class="movie-list"></div>
+          <div id="tabUncertain" class="movie-list hidden"></div>
+          <div id="tabKeep" class="movie-list hidden"></div>
+          <div id="tabSkip" class="movie-list hidden"></div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="card" style="margin-top:16px" id="logCard">
+        <div class="card-header">📟 Live Log</div>
+        <div class="card-body" style="padding:8px">
+          <div class="log-box" id="logBox">
+            <div class="log-entry"><span class="log-time">--:--:--</span><span class="log-info">Waiting for scan to start...</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Right column ── -->
+    <div>
+
+      <!-- Connection status -->
+      <div class="card">
+        <div class="card-header">🔌 Connection</div>
+        <div class="card-body">
+          <div class="conn-row">
+            <span class="conn-label">Radarr 4K</span>
+            <span class="conn-val" id="cfgRadarr">—</span>
+          </div>
+          <div class="conn-row">
+            <span class="conn-label">API Key</span>
+            <span class="conn-val" id="cfgApiKey">—</span>
+          </div>
+          <div class="conn-row">
+            <span class="conn-label">TMDB</span>
+            <span class="conn-val" id="cfgTmdb">—</span>
+          </div>
+          <div class="conn-row">
+            <span class="conn-label">Version</span>
+            <span class="conn-val" id="cfgVersion">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-header">⚡ Actions</div>
+        <div class="card-body">
+
+          <button class="btn btn-primary" id="btnScan" onclick="startScan()">
+            🔍 Scan Movies
+          </button>
+
+          <!-- Delete options (shown after scan) -->
+          <div id="deleteSection" class="hidden">
+            <div class="delete-options">
+              <div class="checkbox-row">
+                <input type="checkbox" id="chkDeleteFiles">
+                <label class="checkbox-label" for="chkDeleteFiles">Delete files from disk</label>
+              </div>
+              <div class="checkbox-desc">⚠️ Also removes movie files. Leave unchecked to only remove from Radarr.</div>
+            </div>
+            <button class="btn btn-danger" id="btnDelete" onclick="startDelete()">
+              🗑 Delete &amp; Blocklist <span id="deleteCount">0</span> Movies
+            </button>
+          </div>
+
+          <button class="btn btn-secondary hidden" id="btnReset" onclick="resetScan()">
+            🔄 Start New Scan
+          </button>
+
+        </div>
+      </div>
+
+      <!-- Info box -->
+      <div class="card" style="margin-top:16px">
+        <div class="card-header">ℹ️ How It Works</div>
+        <div class="card-body" style="font-size:12px; line-height:1.7; color:var(--text2)">
+          <p><strong style="color:var(--text)">1. Scan</strong> — checks every movie in your Radarr 4K instance using TMDB data.</p>
+          <br>
+          <p><strong style="color:var(--text)">2. Analysis</strong></p>
+          <p>✅ <em>Keep</em> — has 4K file or confirmed 4K exists</p>
+          <p>🗑 <em>Delete</em> — confirmed no 4K release</p>
+          <p>❓ <em>Uncertain</em> — can't determine, left alone</p>
+          <br>
+          <p><strong style="color:var(--text)">3. Blocklist</strong> — deleted movies are added to Radarr's import exclusion list so they won't be re-added.</p>
+          <br>
+          <p style="color:var(--orange)">⚠️ Always review the delete list before confirming!</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let pollTimer   = null;
+  let currentTab  = 'delete';
+  let lastLogLen  = 0;
+  let scanResults = null;
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  window.addEventListener('DOMContentLoaded', () => {
+    checkConfig();
+    checkStatus();
+  });
+
+  // ── Config check ───────────────────────────────────────────────────────────
+  async function checkConfig() {
+    try {
+      const r = await fetch('/api/config');
+      const d = await r.json();
+
+      const dot  = document.getElementById('connDot');
+      const txt  = document.getElementById('connText');
+
+      document.getElementById('cfgVersion').textContent = d.radarr_ver || '—';
+      document.getElementById('cfgApiKey').innerHTML    = d.api_key_set
+        ? '<span class="ok">✔ Set</span>' : '<span class="fail">✘ Missing</span>';
+      document.getElementById('cfgTmdb').innerHTML      = d.tmdb_ok
+        ? '<span class="ok">✔ Connected</span>'
+        : (d.tmdb_key_set ? '<span class="fail">✘ Invalid key</span>' : '<span class="warn">⚠ Not set</span>');
+      document.getElementById('cfgRadarr').innerHTML    = d.radarr_ok
+        ? '<span class="ok">✔ Connected</span>' : '<span class="fail">✘ Unreachable</span>';
+
+      if (d.radarr_ok) {
+        dot.className = 'dot green';
+        txt.textContent = `Radarr v${d.radarr_ver}`;
+      } else {
+        dot.className = 'dot red';
+        txt.textContent = 'Radarr unreachable';
+      }
+    } catch(e) {
+      document.getElementById('connDot').className = 'dot red';
+      document.getElementById('connText').textContent = 'Connection error';
+    }
+  }
+
+  // ── Status polling ─────────────────────────────────────────────────────────
+  async function checkStatus() {
+    try {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      updateUI(d);
+
+      if (d.running || d.phase === 'scanning' || d.phase === 'deleting') {
+        pollTimer = setTimeout(checkStatus, 800);
+      } else if (d.phase === 'confirming' || d.phase === 'done') {
+        pollTimer = setTimeout(checkStatus, 3000);
+      }
+    } catch(e) {
+      pollTimer = setTimeout(checkStatus, 3000);
+    }
+  }
+
+  // ── Update UI from status ──────────────────────────────────────────────────
+  function updateUI(d) {
+    const phase = d.phase || 'idle';
+
+    // Phase banner
+    const banner = document.getElementById('phaseBanner');
+    if (phase === 'scanning') {
+      banner.className = 'phase-banner scanning';
+      banner.innerHTML = `<span class="spin">⟳</span> Scanning your Radarr 4K library... (${d.progress}/${d.total})`;
+      banner.classList.remove('hidden');
+    } else if (phase === 'deleting') {
+      banner.className = 'phase-banner deleting';
+      banner.innerHTML = `<span class="spin">⟳</span> Deleting and blocklisting movies...`;
+      banner.classList.remove('hidden');
+    } else if (phase === 'confirming') {
+      const cnt = d.results ? d.results.delete.length : 0;
+      banner.className = cnt > 0 ? 'phase-banner warn' : 'phase-banner done';
+      banner.innerHTML = cnt > 0
+        ? `⚠️ Scan complete — <strong>${cnt} movies</strong> have no 4K release. Review below and confirm deletion.`
+        : `✅ Scan complete — no movies need to be deleted.`;
+      banner.classList.remove('hidden');
+    } else if (phase === 'done') {
+      banner.className = 'phase-banner done';
+      banner.innerHTML = `✅ All done! Deleted movies have been blocklisted in Radarr.`;
+      banner.classList.remove('hidden');
+    } else if (phase === 'error') {
+      banner.className = 'phase-banner deleting';
+      banner.innerHTML = `❌ An error occurred. Check the log below.`;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+
+    // Progress bar
+    const progressWrap = document.getElementById('progressWrap');
+    if (phase === 'scanning' && d.total > 0) {
+      const pct = Math.round((d.progress / d.total) * 100);
+      progressWrap.classList.remove('hidden');
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('progressText').textContent = `Checking movie ${d.progress} of ${d.total}`;
+      document.getElementById('progressPct').textContent = pct + '%';
+    } else {
+      progressWrap.classList.add('hidden');
+    }
+
+    // Stats
+    if (d.results) {
+      scanResults = d.results;
+      document.getElementById('statsRow').style.display = 'grid';
+      document.getElementById('statKeep').textContent      = d.results.keep.length;
+      document.getElementById('statDelete').textContent    = d.results.delete.length;
+      document.getElementById('statUncertain').textContent = d.results.uncertain.length;
+      document.getElementById('statSkip').textContent      = d.results.skip.length;
+
+      document.getElementById('tabBadgeDelete').textContent    = d.results.delete.length;
+      document.getElementById('tabBadgeUncertain').textContent = d.results.uncertain.length;
+      document.getElementById('tabBadgeKeep').textContent      = d.results.keep.length;
+      document.getElementById('tabBadgeSkip').textContent      = d.results.skip.length;
+
+      // Render movie lists
+      renderMovieList('tabDelete',    d.results.delete,    'delete');
+      renderMovieList('tabUncertain', d.results.uncertain, 'uncertain');
+      renderMovieList('tabKeep',      d.results.keep,      'keep');
+      renderMovieList('tabSkip',      d.results.skip,      'skip');
+
+      document.getElementById('resultsSection').classList.remove('hidden');
+
+      // Delete button
+      document.getElementById('deleteCount').textContent = d.results.delete.length;
+    }
+
+    // Buttons
+    const btnScan   = document.getElementById('btnScan');
+    const btnDelete = document.getElementById('btnDelete');
+    const btnReset  = document.getElementById('btnReset');
+    const delSect   = document.getElementById('deleteSection');
+
+    if (phase === 'idle') {
+      btnScan.disabled = false;
+      btnScan.textContent = '🔍 Scan Movies';
+      btnScan.classList.remove('hidden');
+      delSect.classList.add('hidden');
+      btnReset.classList.add('hidden');
+    } else if (phase === 'scanning') {
+      btnScan.disabled = true;
+      btnScan.innerHTML = '<span class="spin">⟳</span> Scanning...';
+      delSect.classList.add('hidden');
+      btnReset.classList.add('hidden');
+    } else if (phase === 'confirming') {
+      btnScan.classList.add('hidden');
+      if (d.results && d.results.delete.length > 0) {
+        delSect.classList.remove('hidden');
+        btnDelete.disabled = false;
+      } else {
+        delSect.classList.add('hidden');
+      }
+      btnReset.classList.remove('hidden');
+    } else if (phase === 'deleting') {
+      btnDelete && (btnDelete.disabled = true);
+      btnReset.classList.add('hidden');
+    } else if (phase === 'done' || phase === 'error') {
+      btnScan.classList.add('hidden');
+      delSect.classList.add('hidden');
+      btnReset.classList.remove('hidden');
+    }
+
+    // Log
+    fetchLog();
+  }
+
+  // ── Render movie list ──────────────────────────────────────────────────────
+  function renderMovieList(containerId, items, type) {
+    const el = document.getElementById(containerId);
+    if (!items || items.length === 0) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">${
+        type === 'delete' ? '🎉' : type === 'uncertain' ? '🤷' : type === 'keep' ? '✅' : '⏭'
+      }</div><div>${
+        type === 'delete' ? 'No movies to delete!' :
+        type === 'uncertain' ? 'No uncertain movies' :
+        type === 'keep' ? 'No movies in keep list' : 'No skipped movies'
+      }</div></div>`;
+      return;
+    }
+    const icons = { delete: '🗑', uncertain: '❓', keep: '✅', skip: '⏭' };
+    el.innerHTML = items.map(item => {
+      const tmdbUrl = item.tmdbId ? `https://www.themoviedb.org/movie/${item.tmdbId}` : null;
+      return `
+        <div class="movie-item">
+          <div class="movie-icon">${icons[type]}</div>
+          <div class="movie-info">
+            <div class="movie-title">${escHtml(item.title)}</div>
+            <div class="movie-reason">${escHtml(item.reason || '')}</div>
+            ${tmdbUrl ? `<a class="tmdb-link" href="${tmdbUrl}" target="_blank">View on TMDB ↗</a>` : ''}
+          </div>
+          <div class="movie-year">${item.year || '?'}</div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Fetch & render log ─────────────────────────────────────────────────────
+  async function fetchLog() {
+    try {
+      const r = await fetch('/api/log');
+      const entries = await r.json();
+      if (entries.length === lastLogLen) return;
+      lastLogLen = entries.length;
+      const box = document.getElementById('logBox');
+      box.innerHTML = entries.map(e =>
+        `<div class="log-entry">
+           <span class="log-time">${e.time}</span>
+           <span class="log-${e.level || 'info'}">${escHtml(e.msg)}</span>
+         </div>`
+      ).join('');
+      box.scrollTop = box.scrollHeight;
+    } catch(e) {}
+  }
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    ['delete','uncertain','keep','skip'].forEach(t => {
+      document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1))
+        .classList.toggle('hidden', t !== tab);
+    });
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  async function startScan() {
+    document.getElementById('btnScan').disabled = true;
+    document.getElementById('statsRow').style.display = 'none';
+    document.getElementById('resultsSection').classList.add('hidden');
+    scanResults = null;
+    lastLogLen  = 0;
+    document.getElementById('logBox').innerHTML = '';
+
+    try {
+      await fetch('/api/scan', { method: 'POST' });
+      pollTimer && clearTimeout(pollTimer);
+      pollTimer = setTimeout(checkStatus, 500);
+    } catch(e) {
+      alert('Failed to start scan: ' + e);
+      document.getElementById('btnScan').disabled = false;
+    }
+  }
+
+  async function startDelete() {
+    const deleteFiles = document.getElementById('chkDeleteFiles').checked;
+    const cnt = scanResults ? scanResults.delete.length : 0;
+    if (cnt === 0) { alert('Nothing to delete.'); return; }
+
+    const msg = `You are about to:\n\n• Delete ${cnt} movie(s) from Radarr 4K\n• Blocklist them (prevent re-adding)\n• Delete files from disk: ${deleteFiles ? 'YES ⚠️' : 'NO'}\n\nAre you sure?`;
+    if (!confirm(msg)) return;
+
+    document.getElementById('btnDelete').disabled = true;
+    try {
+      await fetch('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deleteFiles })
+      });
+      pollTimer && clearTimeout(pollTimer);
+      pollTimer = setTimeout(checkStatus, 500);
+    } catch(e) {
+      alert('Failed to start deletion: ' + e);
+      document.getElementById('btnDelete').disabled = false;
+    }
+  }
+
+  async function resetScan() {
+    await fetch('/api/reset', { method: 'POST' });
+    scanResults = null;
+    lastLogLen  = 0;
+    document.getElementById('statsRow').style.display = 'none';
+    document.getElementById('resultsSection').classList.add('hidden');
+    document.getElementById('phaseBanner').classList.add('hidden');
+    document.getElementById('logBox').innerHTML = '<div class="log-entry"><span class="log-time">--:--:--</span><span class="log-info">Waiting for scan to start...</span></div>';
+    pollTimer && clearTimeout(pollTimer);
+    checkStatus();
+  }
+
+  // ── Utils ──────────────────────────────────────────────────────────────────
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
