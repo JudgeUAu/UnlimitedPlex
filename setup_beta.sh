@@ -98,7 +98,7 @@ TMDB_API_KEY=$(py3 "import json; d=json.load(open('$CONFIG_FILE')); print(d.get(
 export DEBIAN_FRONTEND=noninteractive
 PUID=0
 PGID=0
-DOCKER_NETWORK="arr-stack_arr-network"
+DOCKER_NETWORK="arr-stack"
 ZURG_DIR="/opt/zurg-testing"
 ARR_DIR="/opt/arr-stack"
 DECYPHARR_DIR="/opt/decypharr"
@@ -884,11 +884,11 @@ services:
     volumes:
       - /opt/radarr4k:/config:ro
     networks:
-      - arr-network
+      - arr-stack
 
 networks:
-  arr-network:
-    name: ${DOCKER_NETWORK}
+  arr-stack:
+    name: arr-stack
     external: true
 CLEANUP_COMPOSE
 
