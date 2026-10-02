@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Streaming Originals</title>
+<style>
+:root{--bg:#1a1d23;--bg2:#23272e;--bg3:#2b2f38;--bd:#383d48;--ac:#f5c518;--tx:#d4d8e0;--tx2:#9098a8;--gr:#2ecc71;--rd:#e74c3c;--or:#f39c12;--bl:#3498db}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font:14px 'Segoe UI',system-ui,sans-serif}
+header{background:var(--bg2);border-bottom:2px solid var(--ac);padding:0 24px;height:56px;display:flex;align-items:center;gap:12px}
+header b{color:var(--ac);font-size:19px} header span{color:var(--tx2)}
+.wrap{max-width:1150px;margin:0 auto;padding:20px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--bd);margin-bottom:16px}
+.tab{padding:9px 16px;cursor:pointer;color:var(--tx2);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab.on{color:var(--ac);border-color:var(--ac)}
+.card{background:var(--bg2);border:1px solid var(--bd);border-radius:8px;margin-bottom:16px}
+.card h3{background:var(--bg3);padding:10px 14px;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--tx2);border-bottom:1px solid var(--bd);border-radius:8px 8px 0 0}
+.card .b{padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+label{font-size:12px;color:var(--tx2);display:block;margin-bottom:3px}
+input[type=text],input[type=number],input[type=password],select{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:5px;padding:7px 9px;width:100%;font-size:13px}
+.chk{display:flex;gap:8px;align-items:center;cursor:pointer;color:var(--tx)}
+.chk input{accent-color:var(--ac);width:15px;height:15px}
+button{border:0;border-radius:6px;padding:9px 16px;font-weight:600;cursor:pointer;font-size:13px}
+button:disabled{opacity:.4;cursor:not-allowed}
+.pri{background:var(--ac);color:#111}.dng{background:var(--rd);color:#fff}.sec{background:var(--bg3);color:var(--tx);border:1px solid var(--bd)}
+.tgt{border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg)}
+.tgt .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:10px}
+.tag{font-size:11px;padding:2px 7px;border-radius:10px;background:var(--bg3);color:var(--tx2)}
+.log{background:#111;border:1px solid var(--bd);border-radius:6px;font:12px/1.6 Consolas,monospace;padding:10px;max-height:340px;overflow:auto}
+.success{color:var(--gr)}.danger{color:var(--rd)}.info{color:var(--tx)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--bd);font-size:13px}th{color:var(--tx2);font-size:11px;text-transform:uppercase}
+.hide{display:none}.note{font-size:12px;color:var(--tx2);margin-top:6px;line-height:1.5}
+.ok{color:var(--gr)}.bad{color:var(--rd)}
+</style><script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head><body>
+<header><b>🎬 Streaming Originals</b><span>auto-add English originals to Radarr &amp; Sonarr</span></header>
+<div class="wrap">
+<div class="tabs">
+  <div class="tab on" data-t="run">Run</div>
+  <div class="tab" data-t="set">Settings</div>
+  <div class="tab" data-t="hist">History</div>
+</div>
+
+<!-- RUN -->
+<div id="t-run">
+  <div class="card"><h3>Run</h3><div class="b">
+    <div class="row">
+      <button class="pri" id="bPrev" onclick="run(true)">🔍 Preview (adds nothing)</button>
+      <button class="dng" id="bLive" onclick="run(false)">➕ Add now</button>
+      <span id="rstat" class="tag">idle</span>
+    </div>
+    <div class="note">Preview shows what <i>would</i> be added. "Add now" adds up to the per-run limit to every enabled target, then triggers a search.</div>
+  </div></div>
+  <div class="card hide" id="resCard"><h3>Result</h3><div class="b" id="res"></div></div>
+  <div class="card"><h3>Log</h3><div class="b"><div class="log" id="log">Waiting…</div></div></div>
+</div>
+
+<!-- SETTINGS -->
+<div id="t-set" class="hide">
+  <div class="card"><h3>General</h3><div class="b">
+    <div class="grid">
+      <div><label>TMDB API key</label><input type="password" id="tmdb_key" placeholder="paste key"><div class="note" id="tmdbEnv"></div></div>
+      <div><label>Streaming region (country code)</label><input type="text" id="region" maxlength="2"></div>
+      <div><label>Look back (days, 0 = everything)</label><input type="number" id="lookback_days" min="0"></div>
+      <div><label>TMDB pages per service (20 titles each)</label><input type="number" id="max_pages" min="1" max="20"></div>
+      <div><label>Max adds per target per run</label><input type="number" id="max_adds_per_run" min="1"></div>
+      <div><label>Run automatically every N hours (0 = manual)</label><input type="number" id="interval_hours" min="0"></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="chk"><input type="checkbox" id="english_only"> English original language only</label>
+      <label class="chk"><input type="checkbox" id="add_movies"> Movies</label>
+      <label class="chk"><input type="checkbox" id="add_tv"> TV shows</label>
+      <label class="chk"><input type="checkbox" id="auto_add"> Scheduled runs actually ADD (otherwise preview only)</label>
+    </div>
+  </div></div>
+
+  <div class="card"><h3>Streaming services</h3><div class="b">
+    <div class="grid" id="services"></div>
+    <div class="note">TV: uses TMDB's network field — accurate. Movies: TMDB has no "network", so a movie counts as an original if it's from that service's studio (e.g. Netflix, Amazon MGM, Apple Studios, HBO Films). For Disney+/Hulu/Paramount+/Peacock/Prime/Apple the movie must also be currently streaming there. Movies from some services will be incomplete — treat the movie side as best-effort.</div>
+  </div></div>
+
+  <div class="card"><h3>Targets (Radarr / Sonarr instances)</h3><div class="b">
+    <div id="targets"></div>
+    <div class="note">Leave API key blank to read it from the mounted config.xml. Root folder / quality profile blank = first one found. Use <b>Test</b> to load the real options.</div>
+  </div></div>
+  <button class="pri" onclick="save()">💾 Save settings</button> <span id="saved" class="ok"></span>
+</div>
+
+<!-- HISTORY -->
+<div id="t-hist" class="hide"><div class="card"><h3>Added by this tool</h3><div class="b">
+  <table><thead><tr><th>When</th><th>Title</th><th>Type</th><th>Service</th><th>Target</th></tr></thead><tbody id="hist"></tbody></table>
+</div></div></div>
+</div>
+
+<script>
+let CFG=null, polling=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+  ['run','set','hist'].forEach(n=>$('t-'+n).classList.toggle('hide',n!==t.dataset.t));
+  if(t.dataset.t==='hist')loadHist();
+});
+
+async function loadCfg(){
+  CFG=await (await fetch('/api/config')).json();
+  for(const k of ['tmdb_key','region','lookback_days','max_pages','max_adds_per_run','interval_hours'])$(k).value=CFG[k];
+  for(const k of ['english_only','add_movies','add_tv','auto_add'])$(k).checked=!!CFG[k];
+  $('tmdbEnv').textContent=CFG.tmdb_key_from_env?'A TMDB key is also set via environment variable.':'';
+  $('services').innerHTML=Object.entries(CFG.services).map(([k,s])=>
+    `<label class="chk" style="background:var(--bg);border:1px solid var(--bd);padding:9px;border-radius:6px">
+      <input type="checkbox" data-svc="${k}" ${s.enabled?'checked':''}> ${esc(s.label)}</label>`).join('');
+  renderTargets();
+}
+function renderTargets(){
+  $('targets').innerHTML=CFG.targets.map((t,i)=>`
+   <div class="tgt" data-i="${i}">
+     <div class="row" style="margin:0">
+       <label class="chk"><input type="checkbox" data-f="enabled" ${t.enabled?'checked':''}> <b>${esc(t.name)}</b></label>
+       <span class="tag">${t.type}</span>
+       <button class="sec" onclick="testT(${i})">Test</button><span id="tst${i}" class="note"></span>
+     </div>
+     <div class="g">
+       <div><label>URL</label><input type="text" data-f="url" value="${esc(t.url)}"></div>
+       <div><label>API key (blank = from config.xml)</label><input type="password" data-f="api_key" value="${esc(t.api_key)}"></div>
+       <div><label>Root folder</label><input type="text" data-f="root_folder" value="${esc(t.root_folder)}" id="rf${i}"></div>
+       <div><label>Quality profile</label><select data-f="quality_profile_id" id="qp${i}"><option value="${t.quality_profile_id||0}">${t.quality_profile_id?('ID '+t.quality_profile_id):'(first found)'}</option></select></div>
+       ${t.type==='radarr'?`<div><label>Minimum availability</label><select data-f="min_availability">${['announced','inCinemas','released'].map(v=>`<option ${t.min_availability===v?'selected':''}>${v}</option>`).join('')}</select></div>`
+       :`<div><label>Series type</label><select data-f="series_type">${['standard','anime','daily'].map(v=>`<option ${t.series_type===v?'selected':''}>${v}</option>`).join('')}</select></div>
+         <div><label>Monitor</label><select data-f="monitor">${['all','future','missing','existing','firstSeason','latestSeason','pilot','none'].map(v=>`<option ${t.monitor===v?'selected':''}>${v}</option>`).join('')}</select></div>`}
+       <div><label class="chk" style="margin-top:20px"><input type="checkbox" data-f="search" ${t.search?'checked':''}> Search on add</label></div>
+     </div></div>`).join('');
+}
+function collectTarget(i){
+  const el=document.querySelector(`.tgt[data-i="${i}"]`), t={...CFG.targets[i]};
+  el.querySelectorAll('[data-f]').forEach(x=>{
+    const f=x.dataset.f; t[f]=x.type==='checkbox'?x.checked:(f==='quality_profile_id'?parseInt(x.value||0):x.value);
+  }); return t;
+}
+async function testT(i){
+  const t=collectTarget(i), out=$('tst'+i); out.textContent='testing…';
+  const r=await (await fetch('/api/test-target',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(t)})).json();
+  if(!r.ok){out.innerHTML=`<span class="bad">✘ ${esc(r.error)}</span>`;return}
+  out.innerHTML=`<span class="ok">✔ v${esc(r.version)}</span>`;
+  const sel=$('qp'+i);
+  sel.innerHTML='<option value="0">(first found)</option>'+r.profiles.map(p=>`<option value="${p.id}" ${p.id==t.quality_profile_id?'selected':''}>${esc(p.name)}</option>`).join('');
+  if(!t.root_folder&&r.root_folders.length)$('rf'+i).value=r.root_folders[0];
+  $('rf'+i).title='Available: '+r.root_folders.join(', ');
+}
+async function save(){
+  const c=JSON.parse(JSON.stringify(CFG));
+  for(const k of ['tmdb_key','region'])c[k]=$(k).value.trim();
+  for(const k of ['lookback_days','max_pages','max_adds_per_run','interval_hours'])c[k]=parseInt($(k).value||0);
+  for(const k of ['english_only','add_movies','add_tv','auto_add'])c[k]=$(k).checked;
+  document.querySelectorAll('[data-svc]').forEach(x=>c.services[x.dataset.svc].enabled=x.checked);
+  c.targets=CFG.targets.map((_,i)=>collectTarget(i));
+  if(c.auto_add&&c.interval_hours>0&&!confirm('Scheduled runs will ADD titles automatically. Continue?'))return;
+  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)});
+  $('saved').textContent='✔ Saved'; setTimeout(()=>$('saved').textContent='',2500); loadCfg();
+}
+async function run(dry){
+  if(!dry&&!confirm('Add matching titles to your enabled Radarr/Sonarr targets now?'))return;
+  const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry})});
+  if(!r.ok){alert((await r.json()).error);return}
+  poll();
+}
+function poll(){clearTimeout(polling);tick()}
+async function tick(){
+  const s=await (await fetch('/api/state')).json();
+  $('bPrev').disabled=$('bLive').disabled=s.running;
+  $('rstat').textContent=s.running?(s.dry?'previewing…':'running…'):(s.finished?'finished':'idle');
+  $('log').innerHTML=s.log.length?s.log.map(l=>`<div class="${l.level}">${l.t}  ${esc(l.msg)}</div>`).join(''):'Waiting…';
+  $('log').scrollTop=1e9;
+  if(s.result){
+    $('resCard').classList.remove('hide');
+    const r=s.result;
+    $('res').innerHTML=(r.error?`<div class="bad">${esc(r.error)}</div>`:'')+
+     `<div class="note">Candidates found: ${r.candidates.movie} movies, ${r.candidates.tv} shows</div>`+
+     r.targets.map(t=>{const rows=(s.dry?t.planned:t.added);
+      return `<h4 style="margin:12px 0 6px">${esc(t.name)} <span class="tag">${s.dry?'would add':'added'} ${rows.length}</span> <span class="tag">already had ${t.skipped_existing}</span>${t.errors.length?` <span class="tag bad">${t.errors.length} errors</span>`:''}</h4>`+
+       (rows.length?`<table><tr><th>Title</th><th>Date</th><th>Service</th></tr>${rows.map(x=>`<tr><td>${esc(x.title)}</td><td>${esc(x.date)}</td><td>${esc(x.service)}</td></tr>`).join('')}</table>`:'')+
+       t.errors.map(e=>`<div class="bad note">${esc(e)}</div>`).join('')}).join('');
+  }
+  if(s.running)polling=setTimeout(tick,1000);
+}
+async function loadHist(){
+  const h=await (await fetch('/api/history')).json();
+  $('hist').innerHTML=h.length?h.map(x=>`<tr><td>${esc(x.added_at.replace('T',' '))}</td><td>${esc(x.title)}</td><td>${esc(x.kind)}</td><td>${esc(x.service)}</td><td>${esc(x.target)}</td></tr>`).join(''):'<tr><td colspan=5 class="note">Nothing added yet.</td></tr>';
+}
+loadCfg();tick();
+</script></body></html>
